@@ -12,7 +12,7 @@
 
 Explaining a UI problem, describing a coding task or sketching an idea can be easier on your phone. Pocket Composer combines your phone keyboard, screenshot annotation and a whiteboard, then inserts prepared images and text into a Windows input field.
 
-**Stable: 0.5.4. The visuals below show the 0.5.5 preview.** [Preview notes](docs/release/0.5.5.md) · [Stable release](https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.4)
+**Windows stable: 0.5.5. macOS/Linux remain previews.** [Release notes](docs/release/0.5.5-stable.md)
 
 <table><tr><th>Express on your phone</th><th>Continue on your computer</th></tr><tr><td align="center"><img src="docs/images/product/phone.png" width="270" alt="0.5.5 preview phone composer and sync status" /></td><td align="center"><img src="docs/images/product/hud.png" width="430" alt="0.5.5 preview input-first desktop overlay" /><br/><br/>Read, edit, copy and insert.<br/>Expand assistance only when wanted.</td></tr></table>
 
@@ -41,9 +41,9 @@ No model service is required. A failed insertion keeps the draft available for c
 
 ## Optional Jev references
 
-**Off by default; text, images, copying and insertion work without it.** Enable it for possible transcription issues, four independent reference dimensions and wording tone. There is no overall score, success-rate prediction or mandatory clarification. Compact markers stay below the draft; the full diagram opens on request.
+**Off by default; text, images, copying and insertion work without it.** Enable it for possible transcription issues, four independent reference dimensions and wording tone. There is no overall score, success-rate prediction or mandatory clarification. Labeled segmented bars sit beside the draft; disabling Jev removes the sidebar. Full details open on request.
 
-<div align="center"><img src="docs/images/product/input-feedback.gif" width="430" alt="Optional tone icons, compact markers and a flame effect" /></div>
+<div align="center"><img src="docs/images/product/input-feedback.gif" width="430" alt="Optional tone icons, segmented reference bars and a flame effect" /></div>
 
 *Actual Qt UI with synthetic reference/tone examples. The flame is a visual easter egg, not a judgment of a person's mental state.*
 

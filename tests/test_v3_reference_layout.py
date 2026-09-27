@@ -27,7 +27,8 @@ def test_hud_full_feedback_keeps_action_text_and_rows_separate(pair, font_size):
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QPushButton
     from doubao_typeless.ui.theme import QSS
-    a, _, _ = pair
+    a, window, _ = pair
+    window.input_check_timer.stop()
     from PySide6.QtGui import QFontDatabase
     from doubao_typeless.ui.desktop import apply_ui_font
     if not QFontDatabase.families() and os.name == 'nt':
@@ -42,6 +43,9 @@ def test_hud_full_feedback_keeps_action_text_and_rows_separate(pair, font_size):
         result = parse_response(response(request), request, spans)
         h.set_input_check({**result, 'tone':'彻底怒了', 'tone_kind':'furious', 'note':True})
         QTest.qWait(80)
+        assert h._references.isVisible() and h._check_row.isVisible()
+        assert not h._body.geometry().intersects(h._references.geometry())
+        assert h._card.rect().contains(h._references.geometry())
         for container in (h._check_row, h._bar):
             buttons = [b for b in container.findChildren(QPushButton) if b.isVisible()]
             for button in buttons:
@@ -196,7 +200,18 @@ def test_optional_jev_has_no_space_when_disabled_and_chart_opens_on_request(pair
         result = parse_response(response(request),request,spans)
         a.input_check.result = result
         a.hud.set_input_check(result)
-        assert a.hud._references.height() == 24
+        QTest.qWait(50)
+        assert a.hud._references.x() >= a.hud._body.geometry().right()
+        assert a.hud._body.width() > a.hud._references.width() * 1.8
+        assert a.hud._references.height() >= 100
+        a.hud.set_input_check({'status':'checking'})
+        assert not a.hud._references.isHidden()
+        assert set(a.hud._references.states.values()) == {'unknown'}
+        a.hud.set_input_check({'status':'disabled'})
+        QTest.qWait(30)
+        assert a.hud._references.isHidden()
+        assert a.hud._body.width() > 300
+        a.hud.set_input_check(result)
         events = []
         monkeypatch.setattr(a, '_notify_ui', lambda event, **payload: events.append(event))
         a.hud._check_button.click()
