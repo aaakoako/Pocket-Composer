@@ -1,5 +1,13 @@
 # 更新记录 / Changelog
 
+## 0.5.5 Stable
+
+[中文 / English release notes](docs/release/0.5.5-stable.md)
+
+可选 Jev 分段侧栏、稳定的检查中布局、保留情绪动效、自身窗口识别与正文尺寸修复。
+
+Optional segmented Jev sidebar, stable pending layout, retained tone effects, own-window detection and body sizing fixes.
+
 ## 0.5.5 Preview
 
 [中文 / English release notes](docs/release/0.5.5.md)

@@ -12,7 +12,7 @@
 
 向 Agent 描述界面问题、解释代码需求或画一个布局时，手机往往比键盘更顺手。Pocket Composer 把手机输入法、截图标注和白板放在一起，将整理好的图片与文字插入 Windows 上的目标输入框。
 
-**稳定版：0.5.4。下图展示 0.5.5 体验候选。** [候选说明](docs/release/0.5.5.md) · [稳定版说明](https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.4)
+**Windows 稳定版：0.5.5。Mac/Linux 仍为体验版。** [发布说明](docs/release/0.5.5-stable.md)
 
 <table><tr><th>手机负责表达</th><th>电脑接着做</th></tr><tr><td align="center"><img src="docs/images/product/phone.png" width="270" alt="0.5.5候选手机图文输入与同步" /></td><td align="center"><img src="docs/images/product/hud.png" width="430" alt="0.5.5候选正文优先的电脑浮窗" /><br/><br/>查看、修改、复制、插入。<br/>辅助参考按需展开。</td></tr></table>
 
@@ -41,9 +41,9 @@
 
 ## Jev：可选的输入参考
 
-**默认关闭，不影响输入、图片、复制和插入。** 开启后可查看疑似转写问题、四个独立参考维度和文字语气。不打总分、不预测成功率、不强制追问。浮窗只留小标记，完整参考图点开才显示。
+**默认关闭，不影响输入、图片、复制和插入。** 开启后可查看疑似转写问题、四个独立参考维度和文字语气。不打总分、不预测成功率、不强制追问。正文右侧用短标签和音量条式分段显示状态；关闭后侧栏完全收起。完整详情按需展开。
 
-<div align="center"><img src="docs/images/product/input-feedback.gif" width="430" alt="可选语气图标、轻量参考标记与火焰彩蛋" /></div>
+<div align="center"><img src="docs/images/product/input-feedback.gif" width="430" alt="可选语气图标、分段参考侧栏与火焰彩蛋" /></div>
 
 *实际 Qt 界面录制，参考与语气为合成示例。火焰是界面彩蛋，不是对真实心理状态的判断。*
 

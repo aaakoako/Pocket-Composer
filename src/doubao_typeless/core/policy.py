@@ -48,6 +48,7 @@ def is_own_window(class_name: str, title: str = "", automation_id: str = "") -> 
         name in {"当前图文", "上次结果未知", "查看图片", "当前稿还在"}
         or name.startswith("doubaotypeless v3")
         or name in {"doubaotypeless", "doubaotypeless 预览"}
+        or name == 'pocket composer' or name.startswith('pocket composer ')
     )
 
 

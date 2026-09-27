@@ -110,29 +110,71 @@ class ReferenceChart(QWidget):
 
 
 class ReferenceStrip(ReferenceChart):
-    """Four quiet markers in the HUD toolbar; full diagram belongs in details."""
+    """Quiet segmented sidebar: categorical cues, never invented percentages."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(24)
-        self.setFixedSize(88, 24)
+        self.status = 'disabled'
+        self.setAccessibleName('输入参考侧栏')
+        self._measure()
+
+    def _measure(self):
+        from PySide6.QtGui import QFontMetrics
+        self.chart_font = QFont(self.font())
+        self.chart_font.setPixelSize(min(14, max(11, self.fontMetrics().height() - 3)))
+        metrics = QFontMetrics(self.chart_font)
+        self.row_height = metrics.height() + 16
+        self.setFixedSize(max(100, metrics.horizontalAdvance('上下文或看上文') + 12),
+                          self.row_height * 4 + 8)
+
+    def changeEvent(self, event):
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.FontChange:
+            self._measure()
+        super().changeEvent(event)
+
+    def set_result(self, result):
+        self.status = result.get('status', 'disabled')
+        if self.status in {'disabled', 'empty'}:
+            self.hide()
+            return
+        # Reserve the rail while enabled, but never display a previous draft's result.
+        rows = result.get('references', []) if self.status == 'ready' else []
+        super().set_result({'status':'ready', 'references': rows or [
+            {'id':key,'state':'unknown'} for key in REFERENCE_DIMENSIONS]})
+        self.setToolTip(self.accessibleDescription() + '\n分段仅区分状态，不是评分或执行成功率。')
 
     def sizeHint(self):
-        return QSize(88, 24)
+        return self.size()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        for i, key in enumerate(REFERENCE_DIMENSIONS):
+        font = QFont(self.chart_font); painter.setFont(font)
+        metrics = painter.fontMetrics()
+        labels = {'clear':'清楚','partial':'有歧义','context':'看上文','unknown':'未判断','na':'不涉及',
+                  'tentative_clear':'大致清楚','tentative_partial':'疑歧义',
+                  'tentative_context':'或看上文','tentative_na':'或无关'}
+        for i, (key, (title, _)) in enumerate(REFERENCE_DIMENSIONS.items()):
             state = self.states.get(key, 'unknown')
-            x = 11 + i * 22
-            unknown = state in {'unknown', 'na', 'tentative_na'}
-            color = '#8b94aa' if unknown else '#6156dc'
-            painter.setPen(QPen(QColor(color), 1, Qt.DashLine if unknown or state.startswith('tentative_') else Qt.SolidLine))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPointF(x, 12), 8, 8)
-            symbol = ('check' if state == 'clear' else 'help' if 'partial' in state else
-                      'link' if 'context' in state else 'inspect' if state == 'tentative_clear' else None)
-            if symbol:
-                painter.setOpacity(.65 + .35 * self.phase)
-                icon(symbol, color).paint(painter, x-6, 6, 12, 12)
-                painter.setOpacity(1.)
+            base = state.removeprefix('tentative_')
+            y = 4 + i * self.row_height
+            color = '#5b5ce2' if base == 'clear' else '#a47736' if base == 'partial' else '#8b94aa'
+            painter.setPen(QColor('#687087'))
+            painter.drawText(QRectF(0,y,self.width(),metrics.height()),Qt.AlignLeft, title)
+            label = labels.get(state, '未判断')
+            if self.status in {'checking','waiting'}:label = '待更新'
+            if self.status in {'error','no_key'}:label = '不可用'
+            small = QFont(font);small.setPixelSize(max(10,font.pixelSize()-2))
+            painter.setFont(small);painter.setPen(QColor(color))
+            painter.drawText(QRectF(0,y,self.width(),metrics.height()),Qt.AlignRight|Qt.AlignVCenter,label)
+            painter.setFont(font)
+            filled = 8 if base == 'clear' else 4 if base == 'partial' else 0
+            width = (self.width()-7*3)/8
+            for segment in range(8):
+                rect = QRectF(segment*(width+3), y+metrics.height()+3, width, 6)
+                active = segment < filled
+                painter.setPen(QPen(QColor(color if active else '#dce1ec'), .8,
+                    Qt.DashLine if state.startswith('tentative_') or base in {'unknown','context','na'} else Qt.SolidLine))
+                paint = QColor(color if active else '#f0f2f7')
+                if active:paint.setAlphaF(.3+.7*self.phase)
+                painter.setBrush(paint);painter.drawRoundedRect(rect,1.5,1.5)

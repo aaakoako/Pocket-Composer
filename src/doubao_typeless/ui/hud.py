@@ -223,7 +223,13 @@ class HudController:
         header.addWidget(header_recover)
         header.addWidget(header_dismiss)
         layout.addLayout(header)
-        layout.addWidget(self._body, 1)
+        body_row = QHBoxLayout()
+        body_row.setSpacing(12)
+        body_row.addWidget(self._body, 1)
+        from doubao_typeless.ui.reference_chart import ReferenceStrip
+        self._references = ReferenceStrip(card)
+        body_row.addWidget(self._references, 0, Qt.AlignTop)
+        layout.addLayout(body_row, 1)
         thumbs = QWidget()
         thumbs.setFixedHeight(62)
         self._thumb_row = QHBoxLayout(thumbs)
@@ -250,9 +256,6 @@ class HudController:
         self._note_button.setFocusPolicy(Qt.NoFocus)
         self._note_button.clicked.connect(lambda: self._on_toggle_note and self._on_toggle_note())
         check_layout.addWidget(self._check_button)
-        from doubao_typeless.ui.reference_chart import ReferenceStrip
-        self._references = ReferenceStrip(check_row)
-        check_layout.addWidget(self._references)
         self._tone_badge = ToneBadge()
         check_layout.addWidget(self._tone_badge)
         check_layout.addWidget(self._note_button)
@@ -505,7 +508,7 @@ class HudController:
 
 
     def _max_height(self) -> int:
-        ceiling = max(TOKENS["max_h"], self._chrome_height() + 100)
+        ceiling = max(TOKENS["max_h"], self._chrome_height() + max(100, self._body_minimum()))
         max_h = ceiling
         try:
             from PySide6.QtGui import QGuiApplication
@@ -523,7 +526,7 @@ class HudController:
         summary, details = presentation(result)
         self._references.set_motion(self._motion_enabled)
         self._references.set_result(result)
-        signature = (repr(result.get('references')), summary, details, result.get('note'), result.get('suppressed'), result.get('tone'))
+        signature = (result.get('status'), repr(result.get('references')), summary, details, result.get('note'), result.get('suppressed'), result.get('tone'))
         if signature == self._check_signature:return
         self._check_signature = signature
         from PySide6.QtCore import Qt
@@ -541,7 +544,7 @@ class HudController:
         self._check_row.setVisible(bool(summary))
         if self._widget.isVisible():
             chrome = self._chrome_height()
-            body_height = max(88, min(self._text_height(self._body.toPlainText()), self._max_height() - chrome))
+            body_height = max(self._body_minimum(), min(self._text_height(self._body.toPlainText()), self._max_height() - chrome))
             self._body.setMaximumHeight(body_height)
             self._widget.resize(self._widget.width(), min(self._max_height(), body_height + chrome))
             self._place()
@@ -565,12 +568,18 @@ class HudController:
         reference_h = 0
         return status_h + bar_h + margins + spacing + (68 if self.assets else 0) + check_h + reference_h
 
+    def _body_minimum(self):
+        rail = getattr(self, '_references', None)
+        return max(88, rail.height() if rail is not None and not rail.isHidden() else 0)
+
     def _text_height(self, text: str) -> int:
         try:
             from PySide6.QtCore import QRect, Qt
 
             metrics = self._body.fontMetrics()
-            inner = max(80, TOKENS["width"] - 36)
+            rail = getattr(self, '_references', None)
+            reserved = rail.width() + 12 if rail is not None and not rail.isHidden() else 0
+            inner = max(80, TOKENS["width"] - 36 - reserved)
             rect = metrics.boundingRect(QRect(0, 0, inner, 10_000), int(Qt.TextWordWrap), text)
             return max(40, rect.height() + 12)
         except Exception:
@@ -746,7 +755,7 @@ class HudController:
         max_h = self._max_height()
         doc_h = self._text_height(body)
         min_h = TOKENS["min_image_h"] if self.image_count else TOKENS["min_text_h"]
-        body_h = max(88, min(doc_h, max_h - chrome))
+        body_h = max(self._body_minimum(), min(doc_h, max_h - chrome))
         height = max(min_h, min(max_h, body_h + chrome))
         self._body.setMaximumHeight(body_h)
         self._widget.setFixedWidth(TOKENS["width"])
