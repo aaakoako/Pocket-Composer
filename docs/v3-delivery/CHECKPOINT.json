@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "product_goal": "Pocket Composer macOS / Linux 跨平台体验包交付；Windows 稳定版继续保留。",
+  "product_goal": "Pocket Composer 0.5.5 Windows 正式发行，Jev 分段参考侧栏与输入优先布局。",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "PR #10 已合入 master；跨平台体验包使用固定源码 56457c0，稳定 latest 仍为 0.5.4。",
+  "working_tree": "PR #11 已合入 master；v0.5.5 已公开并设为 latest；Mac/Linux 仍为独立体验版。",
   "source_base": "5198c5c888af9541e118d82dc1026655abb9dceb",
-  "last_completed_slice": "MACOS_LINUX_NATIVE_PREVIEW_PACKAGES",
+  "last_completed_slice": "WINDOWS_0_5_5_STABLE_JEV_SIDEBAR",
   "active_slice": null,
-  "next_action": "收集 macOS 辅助功能授权后的真实 Codex/Cursor 图文插入、实体手机与多屏反馈；Wayland 自动插入、macOS 公证和跨平台登录自启动尚未提供。",
+  "next_action": "收集新版侧栏的真实使用反馈；Mac/Linux 继续按独立体验版边界验证，未将模型参考条视为任务成功率。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -545,5 +545,39 @@
       "Wayland edit/sync/copy only",
       "login autostart unavailable"
     ]
+  },
+  "windows_0_5_5_stable": {
+    "tag": "v0.5.5",
+    "source_sha": "ecf22d379f679537499d2f9bed7bee4f276f016a",
+    "merge_sha": "543ef5ed3d088eacf7460e268b8292794429c9fc",
+    "public": true,
+    "latest": true,
+    "url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.5",
+    "release_run": 36292543762,
+    "ci_run": 36292541515,
+    "changes": [
+      "optional segmented reference sidebar",
+      "pending judgments clear stale draft results without removing the rail",
+      "retained tone icons and anger animation",
+      "body size and brand own-window detection fixes",
+      "bilingual notes and actual Qt media"
+    ],
+    "verified": [
+      "normal and large-font Qt layout",
+      "full source CI",
+      "frozen startup and native text insert",
+      "phone-primary text insert",
+      "browser multiple-images then text",
+      "installer upgrade/data retention/uninstall",
+      "published 0.4.2 executable upgrade/restart using isolated release endpoint",
+      "299 payload files and 5 server asset digests",
+      "public latest endpoint and updater package selection"
+    ],
+    "not_reaccepted": [
+      "real Codex/Cursor",
+      "physical mobile IME",
+      "multiple monitors"
+    ],
+    "reference_semantics": "categorical current-text cues; no success percentage or target-agent history"
   }
 }
