@@ -2,14 +2,18 @@
 import asyncio
 import json
 
+import pytest
+
 from tests.test_v3_editor_transactions import product, synced
 from tests.test_v3_frontend_prod import READ_DRAFT
 
 ALL_RECORDS = """() => new Promise(resolve=>{const r=indexedDB.open('doubao-typeless-v3-drafts',1);
 r.onsuccess=()=>{const tx=r.result.transaction('drafts','readonly'),q=tx.objectStore('drafts').getAllKeys(),v=tx.objectStore('drafts').getAll();
 tx.oncomplete=()=>{resolve(q.result.map((k,i)=>[String(k),v.result[i]&&v.result[i].text]));r.result.close();};};})"""
+# 让最后一句在接管时确实只在内存里：本地写盘防抖（120ms）与同步外发防抖（100ms，外发前会写盘）
+# 都要拖住。只拖 120ms 时，接管若晚于 100ms，这句已正常写进主稿并显示在新页面，场景就不再是“未保存”。
 SLOW_DEBOUNCE = """() => {const original=window.setTimeout;
-window.setTimeout=(fn,ms,...args)=>original(fn,ms===120?60000:ms,...args);}"""
+window.setTimeout=(fn,ms,...args)=>original(fn,(ms===120||ms===100)?60000:ms,...args);}"""
 PENDING = '接管前刚说完、还在 120ms 防抖里的最后一句'
 
 
@@ -34,6 +38,8 @@ def test_takeover_back_restores_pending_text_when_other_tab_did_not_edit(tmp_pat
             await page.evaluate(SLOW_DEBOUNCE)
             app.bridge.paused = True
             await page.fill('#text', PENDING)
+            await asyncio.sleep(.4)
+            assert (await page.evaluate(READ_DRAFT))['text'] == '已保存'
             other = await _take_over(page, app)
             await page.click('#takeTab')
             await page.wait_for_selector('#tabBanner', state='hidden')
@@ -46,13 +52,16 @@ def test_takeover_back_restores_pending_text_when_other_tab_did_not_edit(tmp_pat
     asyncio.run(run())
 
 
-def test_takeover_back_keeps_newer_current_and_side_copies_pending_text(tmp_path):
+@pytest.mark.parametrize('takeover_delay', [0, .4], ids=['prompt-takeover', 'slow-takeover'])
+def test_takeover_back_keeps_newer_current_and_side_copies_pending_text(tmp_path, takeover_delay):
     async def run():
         async with product(tmp_path) as (page, app, _):
             await page.fill('#text', '已保存'); await synced(page)
             await page.evaluate(SLOW_DEBOUNCE)
             app.bridge.paused = True
             await page.fill('#text', PENDING)
+            await asyncio.sleep(takeover_delay)
+            assert (await page.evaluate(READ_DRAFT))['text'] == '已保存'
             other = await _take_over(page, app)
             await other.wait_for_selector('#text:not([disabled])')
             await other.fill('#text', '另一页接着写的新稿')
@@ -64,6 +73,106 @@ def test_takeover_back_keeps_newer_current_and_side_copies_pending_text(tmp_path
             assert draft['text'] == '另一页接着写的新稿'
             records = await page.evaluate(ALL_RECORDS)
             assert any(key.startswith('side-superseded-') and text == PENDING for key, text in records)
+            await other.close()
+    asyncio.run(run())
+
+
+# 只让本页另存副本（side-superseded-*）的写入失败，模拟手机存储已满；同时记下本页实际落下的 put/delete。
+FAIL_SIDE_SAVES = """() => {window.sideFull=true; window.idbLog=[];
+const put=IDBObjectStore.prototype.put, del=IDBObjectStore.prototype.delete;
+IDBObjectStore.prototype.put=function(value,key){
+  if(window.sideFull && String(key).startsWith('side-superseded-'))throw new DOMException('存储已满（模拟）','QuotaExceededError');
+  const request=put.call(this,value,key);
+  this.transaction.addEventListener('complete',()=>window.idbLog.push(['put',String(key),value&&value.text]));
+  return request;};
+IDBObjectStore.prototype.delete=function(key){window.idbLog.push(['delete',String(key)]);return del.call(this,key);};}"""
+
+
+def test_failed_side_save_keeps_page_paused_and_retry_preserves_before_claiming(tmp_path):
+    async def run():
+        async with product(tmp_path) as (page, app, _):
+            await page.fill('#text', '已保存'); await synced(page)
+            await page.evaluate(SLOW_DEBOUNCE)
+            await page.evaluate(FAIL_SIDE_SAVES)
+            app.bridge.paused = True
+            await page.fill('#text', PENDING)
+            other = await _take_over(page, app)
+            await other.wait_for_selector('#text:not([disabled])')
+            await other.fill('#text', '另一页接着写的新稿')
+            await _until(lambda: _current_is(other, '另一页接着写的新稿'))
+
+            for _ in range(2):  # 接管时另存失败；存储仍满时再点也一样失败
+                await page.click('#takeTab')
+                await page.wait_for_function("document.getElementById('tabBanner').hidden||"
+                                             "document.getElementById('takeTab').textContent==='重试保存并继续'")
+                assert await page.input_value('#text') == PENDING
+                assert await page.locator('#tabBanner').is_visible()
+                log = await page.evaluate('window.idbLog')
+                assert not any(op[0] == 'delete' or op[1] in ('writer', 'current') for op in log), log
+                assert (await other.evaluate(READ_DRAFT))['text'] == '另一页接着写的新稿'
+                assert await _no_side_with(page, PENDING)
+                assert await page.evaluate("(()=>{const t=document.getElementById('text');return !t.disabled&&t.readOnly;})()")
+                assert '没能另存' in await page.locator('#tabBanner p').inner_text()
+
+            await page.evaluate('window.sideFull=false')
+            await page.click('#takeTab')
+            await page.wait_for_selector('#tabBanner', state='hidden')
+            assert await page.input_value('#text') == '另一页接着写的新稿'
+            assert (await page.evaluate(READ_DRAFT))['text'] == '另一页接着写的新稿'
+            assert '放进「最近」' in await page.locator('#sync').inner_text()
+            records = await page.evaluate(ALL_RECORDS)
+            assert any(key.startswith('side-superseded-') and text == PENDING for key, text in records)
+            log = await page.evaluate('window.idbLog')
+            keys = [op[1] for op in log]
+            side = next(i for i, op in enumerate(log) if op[1].startswith('side-superseded-') and op[2] == PENDING)
+            # 副本先落盘，之后才登记为写入者；本页没有删除任何记录，也没写过主稿。
+            assert side < keys.index('writer')
+            assert not any(op[0] == 'delete' for op in log) and 'current' not in keys, log
+            await other.wait_for_selector('#tabBanner', state='visible')
+            await other.close()
+    asyncio.run(run())
+
+
+def test_takeover_after_failed_main_save_still_side_copies_the_unsaved_text(tmp_path):
+    # 没有在途防抖、但上一次写主稿已真实失败：这段内容同样只在内存里，接管时也要另存，不能当成“已落盘”。
+    async def run():
+        async with product(tmp_path) as (page, app, _):
+            await page.fill('#text', '已保存'); await synced(page)
+            await page.evaluate("""() => {window.currentFull=true; const put=IDBObjectStore.prototype.put;
+              IDBObjectStore.prototype.put=function(value,key){
+                if(window.currentFull && key==='current')throw new DOMException('存储已满（模拟）','QuotaExceededError');
+                return put.call(this,value,key);};}""")
+            app.bridge.paused = True
+            await page.fill('#text', PENDING)
+            await page.wait_for_function("document.getElementById('localSave').textContent.includes('手机存储不可用')")
+            await page.evaluate('window.currentFull=false')
+            assert (await page.evaluate(READ_DRAFT))['text'] == '已保存'
+            other = await _take_over(page, app)
+            await other.wait_for_selector('#text:not([disabled])')
+            await other.fill('#text', '另一页接着写的新稿')
+            await _until(lambda: _current_is(other, '另一页接着写的新稿'))
+            await page.click('#takeTab')
+            await page.wait_for_selector('#tabBanner', state='hidden')
+            assert await page.input_value('#text') == '另一页接着写的新稿'
+            records = await page.evaluate(ALL_RECORDS)
+            assert any(key.startswith('side-superseded-') and text == PENDING for key, text in records), records
+            await other.close()
+    asyncio.run(run())
+
+
+def test_text_saved_before_takeover_is_what_the_new_tab_shows(tmp_path):
+    # 另一种真实时序：防抖已写盘后才被接管。这句已是主稿，新页面直接显示它，不需要也不另存副本。
+    async def run():
+        async with product(tmp_path) as (page, app, _):
+            await page.fill('#text', '已保存'); await synced(page)
+            app.bridge.paused = True
+            await page.fill('#text', PENDING)
+            await _until(lambda: _current_is(page, PENDING))
+            other = await _take_over(page, app)
+            await other.wait_for_selector('#text:not([disabled])')
+            assert await other.input_value('#text') == PENDING
+            records = await other.evaluate(ALL_RECORDS)
+            assert not any(key.startswith('side-') and text == PENDING for key, text in records)
             await other.close()
     asyncio.run(run())
 

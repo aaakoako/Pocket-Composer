@@ -2,11 +2,11 @@
   "schema_version": 1,
   "product_goal": "Pocket Composer 0.5.6 手机记住配对与自动续接修复候选 + Opus 5.5 发布前审查修复",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "fix/opus55-product-review；Opus实现、Codex独立复核通过；待绑定本次提交构建候选包；未覆盖日用数据",
+  "working_tree": "fix/opus55-product-review；segment01-05均经Codex复核；提交后待新HEAD远端构建，无正式发布",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
   "last_completed_slice": "OPUS55_REVIEW_FIXES",
   "active_slice": null,
-  "next_action": "源码复核通过（docs/v3-delivery/OPUS55_REVIEW_20261001.md），805条实现方全量测试通过、2跳过，25条主审独立测试通过。以提交SHA构建并验证新的Windows候选包；旧221500b不包含本轮修复。正式发布与真实手机/Codex/Cursor验收未完成。",
+  "next_action": "本地主审27项独立用例通过，Opus源码全量812通过2跳过；重跑新HEAD的GitHub候选构建。旧33fe6c9构建失败记录保留，旧221500b包不包含修复；新包、实机与正式发布尚未完成。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -49,10 +49,13 @@
     "原生browser诊断仍出现0x8001010d；同PID完成14场景并正常退出。保留诊断观察项，未将其确诊为进程崩溃。"
   ],
   "independent_review": {
-    "status": "SOURCE_REVIEW_COMPLETE_PACKAGE_PENDING",
+    "status": "SOURCE_REVIEW_COMPLETE_AWAITING_NEW_CI",
+    "previous_status": "SOURCE_REVIEW_COMPLETE_PACKAGE_PENDING",
+    "ci_regression": "33fe6c9 / run 36837249823: Windows 1 failed, 805 passed, 1 skipped; Linux 与升级恢复通过；打包已跳过。修正见 segment_04_ci_takeover。",
+    "final_audit_finding": "R5写副本失败暂停接管并保留内存稿，恢复存储后重试已由主审验证；此前CI夹具时序和真实队列丢快照均已修正并复核",
     "document": "docs/v3-delivery/OPUS55_REVIEW_20261001.md",
     "implementation_model": "Claude Opus 5.5 300K High",
-    "independent_tests": 25,
+    "independent_tests": 27,
     "real_devices_reviewed": false,
     "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9"
   },
@@ -656,6 +659,52 @@
       "not_verified": [
         "持锁写盘期间事件循环线程上的配对/授权请求会短暂等待一次原子写",
         "AuthService 之外直接读 sessions/trusted 的调用方依赖写时复制快照，不持锁"
+      ]
+    },
+    "segment_04_ci_takeover": {
+      "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-04\\implementation.md",
+      "commit_under_test": "33fe6c907e93cdc9ce99300fe7c260668990d24a",
+      "ci_failure": "run 36837249823 Windows: tests/test_opus55_tab_credentials.py::test_takeover_back_keeps_newer_current_and_side_copies_pending_text 第 68 行无 PENDING 的 side-superseded 记录",
+      "root_cause": {
+        "ci_failure": "夹具只把 120ms 本地写盘防抖拖到 60 秒，未拖 100ms 外发防抖；外发前的 persist 会立即写盘。另一页若晚于约 100ms 打开（CI 较慢），这句已作为主稿正常写入并显示在新页面，场景不再是“未保存”，因此没有副本。本地探针：立即接管 3/3 有副本；延迟 0.3 秒接管 5/5 主稿已是该句、新页显示该句、无副本（修复前后均一致）",
+        "product_defect": "DraftRepository.drain 在在途写入被拒（DraftSupersededError）时清空 pending，丢弃被拒期间排队的更新快照（含 onSuperseded→becomeInactive 回调中排入的最后一份），副本只留下较旧的在途快照。用 HEAD 原文件（blob 3186a7c）打包复现：两条新回归均失败"
+      },
+      "fixed": "drafts.ts：被拒后继续处理排队快照；已被接管期间的快照经 preserveSuperseded 只写本页 side-superseded（同一事务读主稿，相同或为空则不写），绝不写主稿；claim 后恢复正常写主稿",
+      "test_changes": "SLOW_DEBOUNCE 同时拖住 100ms 与 120ms；两条接管用例在接管前断言主稿仍为“已保存”；原失败断言不变，并加慢接管（0.4 秒）参数；新增防抖已写盘后接管、新页显示该句的用例",
+      "tests": {
+        "full_suite": "810 passed, 2 skipped",
+        "codex_25": "independent_acceptance.py + review_followups.py + restart_acceptance.py + trust_concurrency_acceptance.py 25 passed",
+        "repeated": "接管相关 4 条连续 12 轮通过；手机存储 8 条连续 12 轮通过",
+        "pre_fix": "HEAD drafts.ts 打包运行：新增两条排队快照回归失败（副本为较旧的在途快照）",
+        "web_dist": "web/dist/assets/index-BRZyzdrp.js sha256 F1C37F7A7F9F058E6E2AF4360A64F0C2925B29A62B9B164E2126EBBF76966D7F"
+      },
+      "not_verified": [
+        "新 HEAD 的 GitHub CI 尚未运行",
+        "真实手机多标签与后台冻结仍未实机验证"
+      ]
+    },
+    "segment_05_side_save_failure": {
+      "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-05\\implementation.md",
+      "commit_under_test": "33fe6c907e93cdc9ce99300fe7c260668990d24a + segment-04/05 未提交改动",
+      "finding": "becomeInactive 用 repository.flush().catch(() => {}) 同时吞掉预期的 DRAFT_SUPERSEDED 与真实写失败（如存储已满）；activateTab 等到的永远是成功，于是登记、读入别页新稿、提示已放进「最近」并清掉 inactiveKept",
+      "fixed": [
+        "app.ts：接管结果区分为是否真正保全。DRAFT_SUPERSEDED 只在副本已在同一事务写成（或与主稿相同、为空而无需另存）后抛出，视为已保全；其它错误视为未落盘",
+        "app.ts：未保全时不 claim、不 applySaved、不清 inactiveKept；保持暂停，横幅与按钮改为如实说明并「重试保存并继续」，输入框改为只读而非禁用以便长按复制；别页主稿不动",
+        "app.ts：再点按钮先用同一份快照重试另存，确认落盘后才登记并读入别页新稿；「已放进最近」只在副本记录确实存在时提示",
+        "drafts.ts + app.ts：新增 unsettled（在途/排队/上次真实失败）；上次写主稿已失败而无防抖在途时，接管也会另存这份内存内容"
+      ],
+      "tests": {
+        "full_suite": "812 passed, 2 skipped",
+        "codex_27": "independent_acceptance + review_followups + restart_acceptance + trust_concurrency_acceptance + storage_order_acceptance + side_save_failure_acceptance 27 passed",
+        "relevant": "手机存储/接管/手机流程/编辑事务/生产前端 36 passed",
+        "new": "test_failed_side_save_keeps_page_paused_and_retry_preserves_before_claiming；test_takeover_after_failed_main_save_still_side_copies_the_unsaved_text",
+        "pre_fix": "HEAD app.ts（blob 1297f31）打包：两条新回归与 Codex side_save_failure_acceptance 均在数据断言处失败（本页变成别页新稿 / 无副本）",
+        "web_dist": "web/dist/assets/index-CaO3p6xW.js sha256 54AFB18CC4BEDA03FF9EA78BEB7647E5CC95C952B8633768D31AB8FD27009738"
+      },
+      "not_verified": [
+        "真实手机存储已满（非注入）时的行为与提示未实机验证",
+        "编辑器打开时被接管且另存失败：与正文共用同一快照路径，未单独加用例",
+        "新 HEAD 的 GitHub CI 尚未运行"
       ]
     }
   }

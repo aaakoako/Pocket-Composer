@@ -5,7 +5,7 @@ import { SharedEditor, type Tool } from "./editor/canvas";
 import { applyReady, applyRotated, buildDraftUpdate, buildPrimaryUpdate, rotatePrimary, DraftOutbox } from "./sync.js";
 import { newId } from "./transport/protocol";
 import { uploadPng, type UploadTicket } from "./transport/upload";
-import { DraftRepository, sameContent, type SavedDraft } from "./storage/drafts";
+import { DraftRepository, DraftSupersededError, sameContent, type SavedDraft } from "./storage/drafts";
 
 type Session = {
   session_id: string;
@@ -351,24 +351,35 @@ export function boot(root: HTMLElement): void {
 
   /** 被接管时本页尚未写入的最后内容；接管回来时据此决定恢复到编辑区还是只留在「最近」。 */
   let inactiveKept: SavedDraft | null = null;
-  let inactiveFlush: Promise<void> = Promise.resolve();
+  let inactiveFlush: Promise<boolean> = Promise.resolve(true);
+  /** 本页最后的内容另存失败：保持暂停、文字留在页面上可复制，直到重试另存成功。 */
+  let keptUnsaved = false;
+  const TAB_BANNER_TEXT = "为避免互相覆盖，本页已暂停。点下面按钮改在本页继续，会读入最新内容。";
+  /** 是否已真正保全：DRAFT_SUPERSEDED 只在副本已于同一事务写成（或与主稿相同无需另存）后才抛出；其它错误表示没有落盘。 */
+  function preservationOutcome(): Promise<boolean> {
+    return repository.flush().then(() => true, error => error instanceof DraftSupersededError);
+  }
   function becomeInactive() {
     if (tabInactive || !restored) return;
-    tabInactive = true;
+    tabInactive = true; keptUnsaved = false;
     const pending = persistTimer !== 0;
     window.clearTimeout(persistTimer); persistTimer = 0;
     const editing = editorOpen();
+    // 之前的写入还在途或已失败时，内存内容同样可能没有落盘，也要保全。
+    const unsettled = repository.unsettled;
     if (editing) {
       saveOpenEditor();
       ++editorSequence; editorAbort?.abort(); editor?.destroy(); editor = null; editorLoading = false;
       $("editor").classList.remove("show"); $("composer").style.display = "flex"; $("mobileHead").style.display = "flex";
     }
-    if (pending || editing) {
+    if (pending || editing || unsettled) {
       // 主稿已归另一页面：受保护写入会被拒，不同的内容在同一事务里另存为 side-superseded，主稿不动。
       inactiveKept = structuredClone(draftSnapshot());
       repository.save(inactiveKept);
     }
-    inactiveFlush = repository.flush().catch(() => {});
+    inactiveFlush = preservationOutcome();
+    $("tabBanner").querySelector("p")!.textContent = TAB_BANNER_TEXT;
+    $("takeTab").textContent = "在此页继续";
     finishSend(activeSend);
     outbox.disconnect();
     for (const controller of uploadControllers.values()) controller.abort();
@@ -385,7 +396,26 @@ export function boot(root: HTMLElement): void {
     activating = true;
     try {
       // 先等被拒的写入落定再登记：否则那次写入会在接管后被接受，用本页旧内存覆盖别页的新主稿。
-      await inactiveFlush;
+      let preserved = await inactiveFlush;
+      if (!preserved && inactiveKept) {
+        // 存储可能已恢复：用同一份快照重试。主稿归别页时受保护写入只会落到本页副本，不碰主稿。
+        repository.save(inactiveKept);
+        inactiveFlush = preservationOutcome();
+        preserved = await inactiveFlush;
+      }
+      if (!preserved) {
+        // 没保全就不登记、不读入别页的稿：否则这段内容唯一的一份会被覆盖。
+        keptUnsaved = true;
+        $("tabBanner").querySelector("p")!.textContent =
+          "本页最后的内容还没能另存（手机存储空间不足或暂不可用），所以仍暂停，内容留在下面，可以长按复制。另一页的稿没有被改动。腾出空间后点「重试保存并继续」。";
+        $("takeTab").textContent = "重试保存并继续";
+        toast("本页内容还没能保存，仍保留在本页；请先复制或腾出空间后重试");
+        update();
+        return;
+      }
+      keptUnsaved = false;
+      $("tabBanner").querySelector("p")!.textContent = TAB_BANNER_TEXT;
+      $("takeTab").textContent = "在此页继续";
       const baseline = repository.lastWritten;
       const saved = await repository.claim();
       const kept = inactiveKept;
@@ -398,8 +428,13 @@ export function boot(root: HTMLElement): void {
         void repository.flush().then(() => repository.discardSide(repository.supersededKey, kept)).catch(() => {});
       } else {
         // 读入其它页面写下的最新稿；本页被拒的不同内容已另存，可在「最近」恢复。
+        let inRecent = false;
+        if (kept && !sameContent(kept, saved)) {
+          try { inRecent = (await repository.sideDrafts()).some(s => s.key === repository.supersededKey && sameContent(kept, s.draft)); }
+          catch { inRecent = false; }
+        }
         applySaved(saved);
-        if (kept && !sameContent(kept, saved)) toast("本页被接管前的最后改动已放进「最近」，可在那里恢复");
+        if (inRecent) toast("本页被接管前的最后改动已放进「最近」，可在那里恢复");
       }
       inactiveKept = null;
       tabInactive = false; $("tabBanner").hidden = true;
@@ -443,7 +478,9 @@ export function boot(root: HTMLElement): void {
     const input = $("text") as HTMLTextAreaElement;
     if (input.value !== state.text) input.value = state.text;
     const writable = restored && !tabInactive;
-    input.disabled = !writable;
+    // 未能保全的内容留在本页：只读而不禁用，用户仍可长按选中复制。
+    input.disabled = !writable && !(tabInactive && keptUnsaved);
+    input.readOnly = !writable;
     ($("photoBtn") as HTMLButtonElement).disabled = !writable;
     ($("boardBtn") as HTMLButtonElement).disabled = !writable;
     ($("captureBtn") as HTMLButtonElement).disabled = !writable || !!pendingCapture;

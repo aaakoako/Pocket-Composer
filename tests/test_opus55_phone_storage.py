@@ -29,6 +29,68 @@ def test_superseded_tab_cannot_overwrite_current_and_keeps_side_copy(storage_pag
     assert result["sides"] == [["side-superseded-tab-a", "A 页迟到的旧内容 2"]]
 
 
+def test_snapshot_queued_from_superseded_callback_is_preserved_not_dropped(storage_page):
+    # 先被拒、后收到广播：onSuperseded（即 becomeInactive）在被拒写入抛出之前排入最新快照。
+    page, _, _ = storage_page
+    result = page.evaluate('''async()=>{
+      let seen=null;
+      const a=new DTStore.DraftRepository(()=>{},()=>a.save({...seen,text:"A 被接管前最后一句",revision:9}),"tab-a");
+      const b=new DTStore.DraftRepository(()=>{},()=>{},"tab-b");
+      await a.claim(); a.save(%s); await a.flush();
+      seen=await b.claim();
+      b.save({...seen,text:"B 页的新稿",revision:2}); await b.flush();
+      a.save({...seen,text:"A 在途的旧快照",revision:3});
+      let error=""; try{await a.flush()}catch(e){error=e.message}
+      return {error,current:(await b.load()).text,
+              sides:(await b.sideDrafts()).map(s=>[s.key,s.draft.text])};
+    }''' % DRAFT)
+    assert result == {"error": "DRAFT_SUPERSEDED", "current": "B 页的新稿",
+                      "sides": [["side-superseded-tab-a", "A 被接管前最后一句"]]}
+
+
+def test_snapshot_queued_behind_rejected_inflight_write_is_preserved(storage_page):
+    # 在途写入尚未完成时又排入更新快照；在途那份被拒后，排队的更新版本必须另存。
+    page, _, _ = storage_page
+    result = page.evaluate('''async()=>{
+      const a=new DTStore.DraftRepository(()=>{},()=>{},"tab-a");
+      const b=new DTStore.DraftRepository(()=>{},()=>{},"tab-b");
+      await a.claim(); a.save(%s); await a.flush();
+      const seen=await b.claim();
+      b.save({...seen,text:"B 页的新稿",revision:2}); await b.flush();
+      a.save({...seen,text:"A 在途",revision:3});
+      a.save({...seen,text:"A 在途之后又说的一句",revision:4});
+      let error=""; try{await a.flush()}catch(e){error=e.message}
+      return {error,current:(await b.load()).text,
+              sides:(await b.sideDrafts()).map(s=>[s.key,s.draft.text])};
+    }''' % DRAFT)
+    assert result == {"error": "DRAFT_SUPERSEDED", "current": "B 页的新稿",
+                      "sides": [["side-superseded-tab-a", "A 在途之后又说的一句"]]}
+
+
+def test_superseded_saves_never_reach_current_until_reclaimed(storage_page):
+    page, _, _ = storage_page
+    result = page.evaluate('''async()=>{
+      const states=[];
+      const a=new DTStore.DraftRepository(s=>states.push(s),()=>{},"tab-a");
+      const b=new DTStore.DraftRepository(()=>{},()=>{},"tab-b");
+      await a.claim(); a.save(%s); await a.flush();
+      const seen=await b.claim();
+      b.save({...seen,text:"B 页的新稿",revision:2}); await b.flush();
+      const errors=[];
+      for (const text of ["A 第一份","A 第二份"]) {
+        a.save({...seen,text,revision:5}); try{await a.flush()}catch(e){errors.push(e.message)}
+      }
+      a.save({...seen,text:"B 页的新稿",revision:6}); try{await a.flush()}catch(e){errors.push(e.message)}
+      const whileSuperseded={current:(await b.load()).text,sides:(await b.sideDrafts()).map(s=>s.draft.text)};
+      const latest=await a.claim();
+      a.save({...latest,text:"A 接管后写主稿",revision:7}); await a.flush();
+      return {errors,whileSuperseded,last:states[states.length-1],current:(await b.load()).text};
+    }''' % DRAFT)
+    assert result["errors"] == ["DRAFT_SUPERSEDED"] * 3
+    assert result["whileSuperseded"] == {"current": "B 页的新稿", "sides": ["A 第二份"]}
+    assert result["last"] == "saved" and result["current"] == "A 接管后写主稿"
+
+
 def test_reclaiming_tab_reads_latest_and_resumes_writing(storage_page):
     page, _, _ = storage_page
     result = page.evaluate('''async()=>{

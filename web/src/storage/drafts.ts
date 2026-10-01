@@ -131,6 +131,11 @@ export class DraftRepository {
 
   get writingSide(): boolean { return this.target !== "current"; }
 
+  /** 还有写入在途/排队，或上次写入真的失败（不含被接管时的预期拒绝）：内存里的内容未必已落盘。 */
+  get unsettled(): boolean {
+    return this.running || !!this.pending || (!!this.error && !(this.error instanceof DraftSupersededError));
+  }
+
   async isWriter(): Promise<boolean> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
@@ -246,18 +251,47 @@ export class DraftRepository {
     if (!this.running) void this.drain();
   }
 
+  /** 已被接管后本页的快照只进本页的 side-superseded 记录，绝不写主稿；与主稿相同或为空则不另存。 */
+  private async preserveSuperseded(value: SavedDraft): Promise<void> {
+    if (!value.text && !value.assets.length) return;
+    const db = await this.open();
+    const key = this.supersededKey;
+    await new Promise<void>((resolve, reject) => {
+      const tx = this.writeTx(db);
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => reject(new Error("LOCAL_STORAGE_WRITE_FAILED"));
+      try {
+        const store = tx.objectStore(STORE);
+        const current = store.get("current");
+        current.onsuccess = () => {
+          try { if (!sameContent(value, current.result)) store.put(value, key); }
+          catch { try {tx.abort();} catch {} }
+        };
+      } catch { try {tx.abort();} catch {} reject(new Error("LOCAL_STORAGE_WRITE_FAILED")); }
+    });
+  }
+
   private async drain(): Promise<void> {
     this.running = true;
     while (this.pending) {
       const value = this.pending;
       this.pending = null;
-      try { await this.write(this.target, value); this.error = null; }
-      catch (error) {
+      try {
+        if (this.superseded && this.target === "current") {
+          await this.preserveSuperseded(value);
+          this.error = new DraftSupersededError();
+          this.onState("superseded");
+        } else {
+          await this.write(this.target, value);
+          this.error = null;
+        }
+      } catch (error) {
         const superseded = error instanceof DraftSupersededError;
         this.error = superseded ? error : new Error("LOCAL_STORAGE_WRITE_FAILED");
         this.onState(superseded ? "superseded" : "unavailable");
-        // 不丢正在等待的新快照；下一次真实用户改动可再次尝试。
-        if (superseded || !this.pending) { this.pending = null; break; }
+        // 被拒期间排队的更新快照（包括 onSuperseded 回调里刚排入的）比被拒的那份更新：
+        // 继续循环，下一轮把它另存为本页的 side 记录，而不是丢掉。写失败且没有新快照时停下。
+        if (!superseded && !this.pending) break;
       }
     }
     this.running = false;
