@@ -74,7 +74,7 @@ def test_app_remember_connected_is_explicit(tmp_path):
     assert app.auth.take_device_secret(session)
 
 
-def test_pair_resume_http_and_secret_once(tmp_path):
+def test_pair_resume_http_and_secret_retried_until_ack(tmp_path):
     async def run():
         auth, _bridge, runner, port = await _serve(tmp_path)
         try:
@@ -91,8 +91,20 @@ def test_pair_resume_http_and_secret_once(tmp_path):
                     f"http://127.0.0.1:{port}/v3/device/secret",
                     headers={"X-DT-Session": session.session_id, "X-DT-Token": session.token},
                 )
-                empty = await again.json()
-                assert "device_secret" not in empty
+                retry = await again.json()
+                assert retry["device_secret"] == secret
+                headers = {"X-DT-Session": session.session_id, "X-DT-Token": session.token,
+                           "Origin": f"http://127.0.0.1:{port}"}
+                rejected = await client.post(f"http://127.0.0.1:{port}/v3/device/secret/ack",
+                                             json={"device_secret": "wrong"}, headers=headers)
+                assert rejected.status == 400
+                assert auth.take_device_secret(session) == secret
+                for _ in range(2):
+                    ack = await client.post(f"http://127.0.0.1:{port}/v3/device/secret/ack",
+                                            json={"device_secret": secret}, headers=headers)
+                    assert ack.status == 200
+                cleared = await client.get(f"http://127.0.0.1:{port}/v3/device/secret", headers=headers)
+                assert "device_secret" not in await cleared.json()
                 resumed = await client.post(
                     f"http://127.0.0.1:{port}/v3/pair",
                     json={"device_id": session.device_id, "device_secret": secret},
@@ -106,6 +118,26 @@ def test_pair_resume_http_and_secret_once(tmp_path):
             await runner.cleanup()
 
     asyncio.run(run())
+
+
+def test_resume_preserves_one_device_grants_and_revoke_all_sessions(tmp_path):
+    auth = AuthService(store_path=tmp_path / "trusted_devices.json")
+    first = auth.complete_pairing(auth.new_pairing_challenge(), allow_insert=True)
+    secret = auth.remember_device(first)
+    second = auth.resume_trusted(first.device_id, secret)
+    third = auth.resume_trusted(first.device_id, secret)
+    assert len(auth.public_sessions()) == 1
+    assert auth.public_sessions()[0]["session_id"] == third.session_id
+    assert not auth.take_device_secret(first)
+    auth.set_grants(third.session_id, allow_capture=True)
+    assert first.allow_capture and second.allow_capture and third.allow_capture
+    assert auth.revoke(second.session_id)
+    assert not auth.public_sessions()
+    for session in (first, second, third):
+        with pytest.raises(ValueError, match="expired"):
+            auth.authorize(session.session_id, session.token, "sync")
+    with pytest.raises(ValueError, match="expired"):
+        auth.resume_trusted(first.device_id, secret)
 
 
 def test_stylesheet_has_hover_focus_tab_underline():

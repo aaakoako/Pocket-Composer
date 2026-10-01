@@ -1,5 +1,13 @@
 # 更新记录 / Changelog
 
+## 0.5.6 Candidate
+
+[中文 / English candidate notes](docs/release/0.5.6-reconnect.md)
+
+修复记住手机后的自动续接：凭据保存确认与重试、临时断网自动恢复、同一设备合并显示，保留草稿和权限。
+
+Fix remembered-phone reconnection with acknowledged credential storage, transient-failure retries and one device entry across sessions, preserving drafts and grants.
+
 ## 0.5.5 Stable
 
 [中文 / English release notes](docs/release/0.5.5-stable.md)

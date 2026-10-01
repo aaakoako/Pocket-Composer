@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "product_goal": "Pocket Composer 0.5.5 Windows 正式发行，Jev 分段参考侧栏与输入优先布局。",
+  "product_goal": "Pocket Composer 0.5.6 手机记住配对与自动续接修复候选 + Opus 5.5 发布前审查修复",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "PR #11 已合入 master；v0.5.5 已公开并设为 latest；Mac/Linux 仍为独立体验版。",
-  "source_base": "5198c5c888af9541e118d82dc1026655abb9dceb",
-  "last_completed_slice": "WINDOWS_0_5_5_STABLE_JEV_SIDEBAR",
+  "working_tree": "0.5.6 发布准备；产品候选42dddc3远端完整构建通过，当前仅整理发布文档；用户已授权合入master并正式发布",
+  "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
+  "last_completed_slice": "OPUS55_REVIEW_FIXES",
   "active_slice": null,
-  "next_action": "收集新版侧栏的真实使用反馈；Mac/Linux 继续按独立体验版边界验证，未将模型参考条视为任务成功率。",
+  "next_action": "合入master并将v0.5.6绑定到合并提交；正式渠道重建，验证包内来源/文件摘要及原生证据后公开Release；实机手机与Codex/Cursor验收仍未完成",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -49,14 +49,18 @@
     "原生browser诊断仍出现0x8001010d；同PID完成14场景并正常退出。保留诊断观察项，未将其确诊为进程崩溃。"
   ],
   "independent_review": {
-    "status": "SOURCE_REVIEW_COMPLETE",
-    "reviewed_feature_sha": "807b934826325ae7218c30a30b73cce3690f5ff4",
-    "reviewed_scroll_sha": "29a32ffeef0e04ca1cfec1ce0d0198d681a2b003",
-    "document": "docs/v3-delivery/RELEASE_0_5_0_PUBLISHED.md",
-    "real_devices_reviewed": false
+    "status": "SOURCE_REVIEW_COMPLETE_AWAITING_NEW_CI",
+    "previous_status": "SOURCE_REVIEW_COMPLETE_PACKAGE_PENDING",
+    "ci_regression": "33fe6c9 / run 36837249823: Windows 1 failed, 805 passed, 1 skipped; Linux 与升级恢复通过；打包已跳过。修正见 segment_04_ci_takeover。",
+    "final_audit_finding": "R5写副本失败暂停接管并保留内存稿，恢复存储后重试已由主审验证；此前CI夹具时序和真实队列丢快照均已修正并复核",
+    "document": "docs/v3-delivery/OPUS55_REVIEW_20261001.md",
+    "implementation_model": "Claude Opus 5.5 300K High",
+    "independent_tests": 27,
+    "real_devices_reviewed": false,
+    "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9"
   },
-  "published": true,
-  "task_complete": true,
+  "published": false,
+  "task_complete": false,
   "integration_20260922": {
     "branch": "v3/integrated-preview-20260922",
     "base": "b32d2d536937d0fcad2c0e2ea76742d60fa47c42",
@@ -579,5 +583,138 @@
       "multiple monitors"
     ],
     "reference_semantics": "categorical current-text cues; no success percentage or target-agent history"
+  },
+  "opus55_review_fixes_20261001": {
+    "branch": "fix/opus55-product-review",
+    "base_sha": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
+    "committed": false,
+    "version_changed": false,
+    "package_built": false,
+    "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-01\\implementation.md",
+    "fixed": {
+      "O-P1-1": "手机/服务端按协议类型与字段白名单校验，不再扫描正文、图注、回执；错误回包带 update_id/intent_id/request_id",
+      "O-P1-2": "NO_STEPS/CANCELLED 可用同一意图由用户再点重试；UNKNOWN/PARTIAL/RUNNING/CONFIRMED 仍判重复；每次点击新 nonce",
+      "O-P1-3": "配对可带有效旧会话证明延续身份；无证明=新身份；ASSET_OWNER 时用本地原图重传，否则需电脑明确批准认领（原手机在线时拒绝）",
+      "O-P1-4": "按来源失败计数与递增锁定（429+Retry-After）；猜错不作废二维码；短码按挑战/全局预算停用，仅「重新配对」恢复；隐藏窗口不新建挑战",
+      "O-P2-1": "退出超时后重开队列、恢复热键、取消遗弃投递；旧停止标记按代际失效",
+      "O-P2-2": "服务端 WebSocket 20 秒心跳；手机回到前台 ping 探测，3 秒无 pong 重连",
+      "O-P2-3/V2": "IndexedDB 写入者登记+同事务校验；被接管页暂停写入、关闭连接、另存不同内容；前台/「在此页继续」读最新后接管；prepare 广播到同设备全部页面",
+      "O-P2-4": "手机主稿冲突可「采用电脑这份」：经鉴权 mirror.request 取全文，先保全手机稿，再按接管协议切换；另一台在线手机的图不带过来",
+      "O-P2-5": "记住/取消记住/昵称按设备操作",
+      "O-P2-6": "管理接口要求本机来源、本机 Host、同源 Origin（端口一致）与 JSON；手机局域网接口不受影响",
+      "O-P2-7": "资产 ID 读取与存储层均限制为安全字符，越界返回 404",
+      "O-P2-8": "升级备份排除 updates；备份失败删除未完成备份；启动/下载前清理旧暂存；就绪等待 120 秒",
+      "O-P2-9": "已有手机主稿时练习框收起且不写电脑副本",
+      "O-P2-10": "截图只发给在线、未过期、有权限的当前目标；歧义/无权限有可见提示",
+      "V1": "主稿读失败不进入可写状态、不写空稿；提供重试与「先写新稿」（独立记录，可在「最近」恢复）",
+      "V3": "信任先写盘后生效；写盘失败不暴露凭据、返回 507；授权/撤销/取消记住同样回滚"
+    },
+    "tests": {
+      "full_suite": "783 passed, 2 skipped (pytest -q --tb=short, Windows, offscreen Qt, isolated tmp dirs)",
+      "baseline_before_changes": "715 passed, 2 skipped",
+      "new_unit": "tests/test_opus55_server_contracts.py 46, tests/test_opus55_http_boundaries.py 5, tests/test_opus55_desktop_ui.py 4",
+      "new_storage_chromium": "tests/test_opus55_phone_storage.py 5",
+      "new_production_page_flows": "tests/test_opus55_phone_flows.py 8（web/dist + 本机 V3App；系统投递为平台替身）",
+      "web": "npm run typecheck 与 npm run build 通过；web/dist 已更新",
+      "changed_existing_assertion": "tests/test_v3_review_8326bb4.py::test_native_region_route_must_pass_granted_session：桩会话补 device_id/expires_at 并声明在线，因截图目标现要求在线未过期"
+    },
+    "not_verified": [
+      "冻结 EXE（留给主 Codex 按提交 SHA 构建）",
+      "真实手机：同一手机多标签、后台冻结、Wi-Fi 切换、扫码 App 内置浏览器",
+      "真实 Cursor/Codex 输入框 NO_STEPS 后重试",
+      "两部真实手机的截图目标与旧图认领"
+    ],
+    "real_user_acceptance": false,
+    "segment_02_followups": {
+      "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-02\\implementation.md",
+      "fixed": {
+        "R1": "投递回执在 attempt.status 发送前由投递线程原子落盘（本机与远端同一路径）；落盘失败不改结果、回包 receipt_saved=false 且手机提示勿重复插入；意图结果写入 v3.sqlite intents 表，重启后 IntentLedger 按原结果判重，RUNNING 视为 UNKNOWN，NO_STEPS/CANCELLED 仍可重试；attempt.status 发送失败也会广播并保留磁盘回执",
+        "R2": "becomeInactive 不再丢 120ms 防抖与打开中的编辑：经受保护写入另存为 side-superseded-<tab>，主稿不动；activateTab 先等该写入落定再登记；主稿未被别页改过时把这份接回编辑区（修订号取较大值+1）并删除重复副本，否则读最新主稿并提示在「最近」恢复",
+        "R3": "resume 只删本页实际尝试的那份 dt.v3.device；请求期间凭据被别页替换或本页已有会话时，迟到的失败/成功回复都丢弃，3 秒后用当前凭据续接；forgetProof 只删属于失效会话的证明；同页 resumeFlight 单飞",
+        "visual": "版本行不再把 source_sha=development 截成 developm（非 40 位提交号显示「开发构建」）；QLabel 允许换行"
+      },
+      "tests": {
+        "full_suite": "795 passed, 2 skipped",
+        "codex_independent": "independent_acceptance.py 20 passed；review_followups.py 2 passed（XML 另存 segment-02，不覆盖 Codex 证据）",
+        "new": "tests/test_opus55_receipt_durability.py 5；tests/test_opus55_tab_credentials.py 5（web/dist 生产页双标签与共享凭据）；tests/test_opus55_desktop_ui.py +2",
+        "web_dist": "web/dist/assets/index-6B467Z7F.js sha256 DC224218C49C7505B3C42D38A7C7AA3249906DCF10810979295096629B4ED03A"
+      },
+      "not_verified": [
+        "跨标签 localStorage 比较后删除不是原子操作（浏览器无 CAS），极窄窗口仍可能交错",
+        "进程在 RUNNING 意图落盘之前崩溃时，该意图重启后不被识别（尚未发出任何按键）",
+        "真实手机多标签/后台冻结与真实输入框仍未实机验证；冻结 EXE 留给主 Codex"
+      ]
+    },
+    "segment_03_trust_concurrency": {
+      "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-03\\implementation.md",
+      "fixed": {
+        "R4": "AuthService 加 threading.RLock；配对/重新配对、记住、取消记住、授权、撤销/忘记、续接、ACK、取凭据、会话列表整段持锁（读表→写盘→换内存→改会话字段）；会话表增删改为写时复制发布；锁内无事件循环等待；写盘失败仍不改内存与会话"
+      },
+      "tests": {
+        "full_suite": "805 passed, 2 skipped",
+        "codex_trust_concurrency": "trust_concurrency_acceptance.py 1 passed",
+        "codex_24": "independent_acceptance.py + review_followups.py + restart_acceptance.py 24 passed（首轮一次 Chromium net::ERR_NO_BUFFER_SPACE 页面加载失败，单独与连续三轮重跑均通过，XML 分别保留）",
+        "new": "tests/test_opus55_trust_concurrency.py 10；去掉锁时其中 5 条与 Codex 复现失败"
+      },
+      "not_verified": [
+        "持锁写盘期间事件循环线程上的配对/授权请求会短暂等待一次原子写",
+        "AuthService 之外直接读 sessions/trusted 的调用方依赖写时复制快照，不持锁"
+      ]
+    },
+    "segment_04_ci_takeover": {
+      "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-04\\implementation.md",
+      "commit_under_test": "33fe6c907e93cdc9ce99300fe7c260668990d24a",
+      "ci_failure": "run 36837249823 Windows: tests/test_opus55_tab_credentials.py::test_takeover_back_keeps_newer_current_and_side_copies_pending_text 第 68 行无 PENDING 的 side-superseded 记录",
+      "root_cause": {
+        "ci_failure": "夹具只把 120ms 本地写盘防抖拖到 60 秒，未拖 100ms 外发防抖；外发前的 persist 会立即写盘。另一页若晚于约 100ms 打开（CI 较慢），这句已作为主稿正常写入并显示在新页面，场景不再是“未保存”，因此没有副本。本地探针：立即接管 3/3 有副本；延迟 0.3 秒接管 5/5 主稿已是该句、新页显示该句、无副本（修复前后均一致）",
+        "product_defect": "DraftRepository.drain 在在途写入被拒（DraftSupersededError）时清空 pending，丢弃被拒期间排队的更新快照（含 onSuperseded→becomeInactive 回调中排入的最后一份），副本只留下较旧的在途快照。用 HEAD 原文件（blob 3186a7c）打包复现：两条新回归均失败"
+      },
+      "fixed": "drafts.ts：被拒后继续处理排队快照；已被接管期间的快照经 preserveSuperseded 只写本页 side-superseded（同一事务读主稿，相同或为空则不写），绝不写主稿；claim 后恢复正常写主稿",
+      "test_changes": "SLOW_DEBOUNCE 同时拖住 100ms 与 120ms；两条接管用例在接管前断言主稿仍为“已保存”；原失败断言不变，并加慢接管（0.4 秒）参数；新增防抖已写盘后接管、新页显示该句的用例",
+      "tests": {
+        "full_suite": "810 passed, 2 skipped",
+        "codex_25": "independent_acceptance.py + review_followups.py + restart_acceptance.py + trust_concurrency_acceptance.py 25 passed",
+        "repeated": "接管相关 4 条连续 12 轮通过；手机存储 8 条连续 12 轮通过",
+        "pre_fix": "HEAD drafts.ts 打包运行：新增两条排队快照回归失败（副本为较旧的在途快照）",
+        "web_dist": "web/dist/assets/index-BRZyzdrp.js sha256 F1C37F7A7F9F058E6E2AF4360A64F0C2925B29A62B9B164E2126EBBF76966D7F"
+      },
+      "not_verified": [
+        "新 HEAD 的 GitHub CI 尚未运行",
+        "真实手机多标签与后台冻结仍未实机验证"
+      ]
+    },
+    "segment_05_side_save_failure": {
+      "matrix": "G:\\AgentStorage\\Deliveries\\PocketComposer-Opus55-Fixes-20261001\\segment-05\\implementation.md",
+      "commit_under_test": "33fe6c907e93cdc9ce99300fe7c260668990d24a + segment-04/05 未提交改动",
+      "finding": "becomeInactive 用 repository.flush().catch(() => {}) 同时吞掉预期的 DRAFT_SUPERSEDED 与真实写失败（如存储已满）；activateTab 等到的永远是成功，于是登记、读入别页新稿、提示已放进「最近」并清掉 inactiveKept",
+      "fixed": [
+        "app.ts：接管结果区分为是否真正保全。DRAFT_SUPERSEDED 只在副本已在同一事务写成（或与主稿相同、为空而无需另存）后抛出，视为已保全；其它错误视为未落盘",
+        "app.ts：未保全时不 claim、不 applySaved、不清 inactiveKept；保持暂停，横幅与按钮改为如实说明并「重试保存并继续」，输入框改为只读而非禁用以便长按复制；别页主稿不动",
+        "app.ts：再点按钮先用同一份快照重试另存，确认落盘后才登记并读入别页新稿；「已放进最近」只在副本记录确实存在时提示",
+        "drafts.ts + app.ts：新增 unsettled（在途/排队/上次真实失败）；上次写主稿已失败而无防抖在途时，接管也会另存这份内存内容"
+      ],
+      "tests": {
+        "full_suite": "812 passed, 2 skipped",
+        "codex_27": "independent_acceptance + review_followups + restart_acceptance + trust_concurrency_acceptance + storage_order_acceptance + side_save_failure_acceptance 27 passed",
+        "relevant": "手机存储/接管/手机流程/编辑事务/生产前端 36 passed",
+        "new": "test_failed_side_save_keeps_page_paused_and_retry_preserves_before_claiming；test_takeover_after_failed_main_save_still_side_copies_the_unsaved_text",
+        "pre_fix": "HEAD app.ts（blob 1297f31）打包：两条新回归与 Codex side_save_failure_acceptance 均在数据断言处失败（本页变成别页新稿 / 无副本）",
+        "web_dist": "web/dist/assets/index-CaO3p6xW.js sha256 54AFB18CC4BEDA03FF9EA78BEB7647E5CC95C952B8633768D31AB8FD27009738"
+      },
+      "not_verified": [
+        "真实手机存储已满（非注入）时的行为与提示未实机验证",
+        "编辑器打开时被接管且另存失败：与正文共用同一快照路径，未单独加用例",
+        "新 HEAD 的 GitHub CI 尚未运行"
+      ]
+    }
+  },
+  "release_056_candidate_evidence": {
+    "source_sha": "42dddc33acb8532e216775537845ec6ef8f1f0e5",
+    "workflow": "https://github.com/aaakoako/Pocket-Composer/actions/runs/36841934765",
+    "windows": "813 passed, 1 skipped",
+    "linux": "803 passed, 11 skipped",
+    "independent": "27 passed",
+    "frozen_windows": "startup/native text/phone-primary/browser14/installer/legacy0.4.2/failure recovery passed",
+    "real_user_acceptance": false
   }
 }

@@ -106,7 +106,8 @@ try {
     $readyPath = Join-Path $installRoot ('.update-ready-' + [Guid]::NewGuid().ToString('N'))
     Write-UpgradeLog 'Starting new application; awaiting application readiness'
     $child = Start-Application $fullExe $readyPath
-    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    # First start of a new version backs up user data before reporting readiness.
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
     do {
         if (Test-Path -LiteralPath $readyPath) {
             if (([IO.File]::ReadAllText($readyPath)).Trim() -eq $expectedSource) {

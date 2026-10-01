@@ -12,13 +12,16 @@ from typing import Callable, Any
 
 
 class CommandQueue:
-    def __init__(self, *, on_error: Callable[[BaseException], None] | None = None):
+    def __init__(self, *, on_error: Callable[[BaseException], None] | None = None,
+                 on_start: Callable[[], None] | None = None):
         self._queue: queue.Queue = queue.Queue()
         self._guard = threading.Lock()
         self._active = False
         self._closed = False
+        self._close_generation = 0
         self._thread: threading.Thread | None = None
         self._on_error = on_error
+        self._on_start = on_start
         self._executing = False
         self._ready_callbacks: list[Callable[[], None]] = []
 
@@ -45,14 +48,21 @@ class CommandQueue:
     def _work(self):
         while True:
             job = self._queue.get()
-            if job is None:
+            if isinstance(job, _Stop):
                 self._queue.task_done()
-                return
+                with self._guard:
+                    # 关闭超时后已重新开放：旧的停止标记作废，继续服务。
+                    if self._closed and job.generation == self._close_generation:
+                        self._thread = None
+                        return
+                continue
             future, callback, args, kwargs = job
             value: Any = {"result": "CANCELLED"}
             if future.set_running_or_notify_cancel():
                 self._executing = True
                 try:
+                    if self._on_start:
+                        self._on_start()
                     value = callback(*args, **kwargs)
                 except Exception as exc:
                     if self._on_error:
@@ -91,7 +101,24 @@ class CommandQueue:
                 return True
             if first_close:
                 # 哨兵排在已接收任务之后，不遗弃 Future；新的 submit 已被拒绝。
-                self._queue.put_nowait(None)
+                self._close_generation += 1
+                self._queue.put_nowait(_Stop(self._close_generation))
         if thread is not threading.current_thread():
             thread.join(timeout)
         return not thread.is_alive()
+
+    def reopen(self) -> None:
+        """退出等待超时后恢复服务。仍在执行的旧任务结束后，队列照常接收新操作。"""
+        with self._guard:
+            if not self._closed:
+                return
+            self._closed = False
+            if self._thread is not None and not self._thread.is_alive():
+                self._thread = None
+
+
+class _Stop:
+    __slots__ = ("generation",)
+
+    def __init__(self, generation: int):
+        self.generation = generation

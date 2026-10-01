@@ -12,7 +12,7 @@
 
 向 Agent 描述界面问题、解释代码需求或画一个布局时，手机往往比键盘更顺手。Pocket Composer 把手机输入法、截图标注和白板放在一起，将整理好的图片与文字插入 Windows 上的目标输入框。
 
-**Windows 稳定版：0.5.5。Mac/Linux 仍为体验版。** [发布说明](docs/release/0.5.5-stable.md)
+**Windows 稳定版：0.5.6。Mac/Linux 仍为体验版。** [发布说明](docs/release/0.5.6-reconnect.md)
 
 <table><tr><th>手机负责表达</th><th>电脑接着做</th></tr><tr><td align="center"><img src="docs/images/product/phone.png" width="270" alt="0.5.5候选手机图文输入与同步" /></td><td align="center"><img src="docs/images/product/hud.png" width="430" alt="0.5.5候选正文优先的电脑浮窗" /><br/><br/>查看、修改、复制、插入。<br/>辅助参考按需展开。</td></tr></table>
 
@@ -80,3 +80,4 @@ Pocket Composer 是独立项目，不声称与豆包、字节跳动、OpenAI、C
 [反馈问题](https://github.com/aaakoako/Pocket-Composer/issues)时，请附版本、浏览器/输入法、复现步骤与脱敏截图；不要上传 Key、配对凭据或私人正文。
 
 [构建与验证](docs/release/v3-build.md) · [更新记录](CHANGELOG.md) · [旧版指南](docs/legacy-v0.4.md)
+

@@ -76,8 +76,11 @@ class V3App:
             except Exception:
                 self._lock.release()
                 raise
+        from doubao_typeless.services.v3_update import prune_update_staging
+        prune_update_staging(self.data_dir)
         from doubao_typeless.services.command_queue import CommandQueue
-        self._commands = CommandQueue(on_error=self._report_command_error)
+        self._commands = CommandQueue(on_error=self._report_command_error, on_start=self._on_command_start)
+        self._abandoned_command = False
         self._last_delivery_status: dict = {}
         self.auth = AuthService(store_path=self.data_dir / "trusted_devices.json")
         self.store = AssetStore(self.data_dir / "assets")
@@ -89,6 +92,7 @@ class V3App:
         chunk = int(raw_chunk) if raw_chunk.isdigit() and int(raw_chunk) >= 1024 else CHUNK
         self.uploads = UploadService(self.store, self.db, chunk_size=chunk)
         self.ledger = IntentLedger()
+        self.ledger.seed(self.db.recent_intents())
         self.draft = Draft(
             draft_id=str(uuid.uuid4()),
             epoch=str(uuid.uuid4()),
@@ -178,6 +182,7 @@ class V3App:
             data_dir=self.data_dir,
             phone_send=self.phone_send,
             on_send=lambda session, body: self._commands.submit(self.phone_send.commit, session, body),
+            on_asset_claim=self._on_asset_claim,
         )
         self.capture = CaptureService(grab=self._grab, hide_surfaces=self.hud.hide)
         self.delivery = DeliveryService(
@@ -192,10 +197,17 @@ class V3App:
             is_elevated=self._target_elevated,
             read_clipboard_text=self._read_clipboard_text,
             prepare_image=self._prepare_image_observation,
-            is_cancelled=lambda: self._stopping,
+            is_cancelled=self._delivery_cancelled,
             resume_input=self._resume_after_image,
             progress=lambda progress:self._notify_ui("delivery_progress", **progress),
         )
+
+    def _delivery_cancelled(self) -> bool:
+        return bool(getattr(self, "_stopping", False) or getattr(self, "_abandoned_command", False))
+
+    def _on_command_start(self) -> None:
+        # 退出超时时卡住的那一项保持取消；它返回后，下一项操作照常执行。
+        self._abandoned_command = False
 
     def _report_command_error(self, exc: BaseException) -> None:
         # 不记录异常消息：系统/模型异常可能包含原文、密钥或私人路径。
@@ -419,14 +431,15 @@ class V3App:
         self._notify_ui("delivery_failed", **payload)
         return payload
 
-    def remember_connected(self) -> int:
-        count = 0
+    def remember_device_id(self, device_id: str) -> bool:
+        """只记住这一台手机。写盘失败抛 TrustStoreError，界面保持未记住并可重试。"""
+        sessions = [s for s in self.auth.sessions.values()
+                    if s.device_id == device_id and time.time() <= s.expires_at]
+        if not sessions:
+            return False
         loop = getattr(self, "_loop", None)
-        for session in list(self.auth.sessions.values()):
-            if time.time() > session.expires_at:
-                continue
+        for session in sessions:
             secret = self.auth.remember_device(session)
-            count += 1
             if secret and loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self.bridge.send_to_session(
@@ -439,7 +452,40 @@ class V3App:
                     ),
                     loop,
                 )
-        return count
+        return True
+
+    def unremember_device_id(self, device_id: str) -> bool:
+        """取消这台手机的自动续接；不影响其它手机，也不断开当前连接。"""
+        return self.auth.unremember_device(device_id)
+
+    def remember_connected(self) -> int:
+        devices = {s.device_id for s in self.auth.sessions.values() if time.time() <= s.expires_at}
+        return sum(1 for device_id in devices if self.remember_device_id(device_id))
+
+    def _on_asset_claim(self, device_id: str, asset_ids: list) -> None:
+        _log(f"[v3.assets] claim_pending count={len(asset_ids)}")
+        self._notify_ui("asset_claim", device_id=device_id, count=len(asset_ids))
+
+    def pending_asset_claims(self) -> dict[str, int]:
+        return {device: len(ids) for device, ids in self.bridge.asset_claims().items()}
+
+    def resolve_asset_claim(self, device_id: str, approve: bool) -> int:
+        """电脑明确批准后，才把旧连接上传的图转给这台手机。"""
+        loop = getattr(self, "_loop", None)
+        if loop is None or not loop.is_running():
+            if not approve:
+                self.bridge._asset_claims.pop(device_id, None)
+            return 0
+        moved = asyncio.run_coroutine_threadsafe(self.bridge.resolve_asset_claim(device_id, approve), loop).result(5)
+        _log(f"[v3.assets] claim_resolved approve={approve} moved={len(moved)}")
+        return len(moved)
+
+    def update_practice_text(self, text: str) -> bool:
+        """连接页练习框不得在已有手机主稿时制造隐藏的电脑编辑副本。"""
+        if self.draft.authority == "phone":
+            return False
+        self.update_pc_text(text)
+        return True
 
     def forget_connected(self) -> int:
         ids = {s.device_id for s in self.auth.sessions.values()}
@@ -786,7 +832,7 @@ class V3App:
         from doubao_typeless.adapters.cursor_windows import observe_image
 
         try:
-            return observe_image(getattr(self, "_image_baseline", None), cancelled=lambda:self._stopping)
+            return observe_image(getattr(self, "_image_baseline", None), cancelled=self._delivery_cancelled)
         except Exception as exc:
             from doubao_typeless.runtime_diagnostics import record_runtime_exception
             record_runtime_exception("attachment_observation", exc, self.data_dir)
@@ -907,13 +953,22 @@ class V3App:
             "asset_refs": [a.get("asset_id") for a in self.draft.assets],
         }
 
-    def _publish_phone_event(self, event: dict) -> None:
+    def _persist_phone_event(self, event: dict) -> bool:
         from doubao_typeless.storage.draft_snapshot import write_json_atomic
-        write_json_atomic(self.data_dir / "phone-event.json", event)
+        try:
+            write_json_atomic(self.data_dir / "phone-event.json", event)
+            return True
+        except OSError as exc:
+            _log(f"[v3.receipt] persist_failed {type(exc).__name__}")
+            return False
+
+    def _publish_phone_event(self, event: dict) -> bool:
+        saved = self._persist_phone_event(event)
         self.bridge.last_phone_event = event
         loop = getattr(self, "_loop", None)
         if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(self.bridge.publish_phone_event(event), loop)
+            asyncio.run_coroutine_threadsafe(self.bridge.publish_phone_event(event, persist=not saved), loop)
+        return saved
 
     def _after_insert(self, bundle: dict, payload: dict, *, publish: bool = True) -> dict:
         if payload.get("duplicate"):
@@ -935,9 +990,14 @@ class V3App:
         self.phone_send.record_delivery(bundle, payload, self._last_target_fp)
         if payload.get("error_code"): event["error_code"] = payload["error_code"]
         self.bridge.last_phone_event = event
+        # 回执必须在任何网络发送之前落盘：发送 attempt.status 失败或进程随后退出，
+        # 手机重连仍能从 /v3/phone/event 取到“已投递”，不会把同一稿当作未发再发一次。
         if publish:
-            self._publish_phone_event(event)
-        payload = {**payload, "phone_event": event}
+            saved = self._publish_phone_event(event)
+        else:
+            saved = self._persist_phone_event(event)
+        # 回执没存下也不改投递结果：键盘可能已经贴出，不能报成可安全重试。
+        payload = {**payload, "phone_event": event, "receipt_saved": saved is not False}
         self._notify_ui("hide_after_insert")
         if payload.get("error_code"):
             self._notify_ui("delivery_failed", **payload)
@@ -1000,6 +1060,8 @@ class V3App:
         self._active_delivery_intent = intent_id
         self._active_delivery_primary = bundle.get("authority") == "phone"
         try:
+            # 意图先落盘为 RUNNING：进程在投递中途退出，重启后按 UNKNOWN 判重而不是重贴。
+            self.db.record_intent(intent_id, "RUNNING")
             # 保存完整副本后才允许触碰剪贴板。未准备成功不执行任何按键。
             self.history.record(bundle, attempt_result="RUNNING")
             self.bridge.last_bundle = copy.deepcopy(bundle)
@@ -1068,6 +1130,11 @@ class V3App:
                 pass  # 投递前成功写下的 RUNNING 副本仍然用于恢复。
         finally:
             self.ledger.finish(intent_id, attempt.result)
+            try:
+                self.db.record_intent(intent_id, attempt.result)
+            except Exception as exc:
+                # 落盘的 RUNNING 仍在，重启后保守地按 UNKNOWN 判重。
+                _log(f"[v3.delivery] intent_journal_failed {type(exc).__name__}")
             self._active_delivery_device = None
             self._active_delivery_intent = None
             self._active_delivery_primary = False
@@ -1374,7 +1441,30 @@ class V3App:
             self._notify_ui("recovery_ask")
             return
 
+    def capture_target(self) -> tuple[object | None, str]:
+        """截图只发给当前有效目标：在线、未过期、有截图权限；正在编辑手机稿的那台优先。"""
+        now = time.time()
+        online = self.bridge.online_device_ids()
+        live = [s for s in self.auth.sessions.values()
+                if now <= getattr(s, "expires_at", 0) and getattr(s, "device_id", "") in online]
+        owner = self.draft.editor_device_id if self.draft.authority == "phone" else ""
+        if owner and any(s.device_id == owner for s in live):
+            granted = [s for s in live if s.device_id == owner and s.allow_capture]
+            return (granted[-1], "") if granted else (None, "CAPTURE_DENIED")
+        granted = [s for s in live if s.allow_capture]
+        devices = {s.device_id for s in granted}
+        if not devices:
+            return None, "CAPTURE_DENIED" if live else "CAPTURE_NO_PHONE"
+        if len(devices) > 1:
+            return None, "CAPTURE_TARGET_AMBIGUOUS"
+        return granted[-1], ""
+
     def capture_region(self) -> None:
+        session, reason = self.capture_target()
+        if session is None:
+            _log(f"[v3.capture] region skipped reason={reason}")
+            self._notify_ui("capture_unavailable", error_code=reason)
+            return
         from doubao_typeless.ui.region import select_region
 
         self.hud.hide()
@@ -1382,19 +1472,21 @@ class V3App:
         if box is None:
             _log("[v3.capture] region cancelled; no new image")
             return
-        x, y, w, h = box
-        granted = [item for item in self.auth.sessions.values() if item.allow_capture]
-        if not granted:
-            _log("[v3.capture] region needs capture grant")
+        current, reason = self.capture_target()
+        if current is None or current.device_id != session.device_id:
+            # 框选期间手机离线、撤权或换了编辑者：不把截图发给别的手机。
+            _log(f"[v3.capture] region target changed reason={reason or 'CAPTURE_TARGET_CHANGED'}")
+            self._notify_ui("capture_unavailable", error_code=reason or "CAPTURE_TARGET_CHANGED")
             return
-        session = granted[-1]
+        session = current
+        x, y, w, h = box
         meta = self._on_capture(f"region:{x},{y},{w},{h}", str(uuid.uuid4()), session)
         if isinstance(meta, dict):
             meta["status"] = "editing"
             meta["role"] = "source"
             loop = getattr(self, "_loop", None)
             if loop is not None:
-                asyncio.run_coroutine_threadsafe(self.bridge.send_to_session(session.session_id,
+                asyncio.run_coroutine_threadsafe(self.bridge.send_to_device(session.device_id,
                     {"type": "capture.result", "asset": meta}), loop)
         _log(f"[v3.capture] region {meta.get('width')}x{meta.get('height')}")
 
@@ -1447,6 +1539,7 @@ class V3App:
         self._stop_hotkeys()
         from doubao_typeless.platform.desktop import start_hotkeys
 
+        self._hotkey_combos = (insert, recall, expand, capture)
         start = start_hotkeys(
             on_insert=self.request_insert,
             on_recall=self.request_recall,
@@ -1459,6 +1552,21 @@ class V3App:
         )
         self._hotkeys = start
         return list(start.get("failures") or [])
+
+    def _resume_after_failed_stop(self) -> None:
+        """退出等待超时：不强杀卡住的目标，但当前版本恢复可用（队列、热键、插入）。"""
+        self._abandoned_command = True
+        self._stopping = False
+        self._commands.reopen()
+        combos = getattr(self, "_hotkey_combos", None)
+        if combos:
+            try:
+                failures = self.apply_hotkeys(combos[0], combos[1], expand=combos[2], capture=combos[3])
+                if failures:
+                    _log(f"[v3.shutdown] hotkeys_restore_failures={len(failures)}")
+            except Exception as exc:
+                self._report_command_error(exc)
+        _log("[v3.shutdown] stage=cancelled_resumed")
 
     def _stop_hotkeys(self) -> None:
         hotkeys = getattr(self, "_hotkeys", None) or {}
@@ -1480,6 +1588,7 @@ class V3App:
         stopped = await asyncio.to_thread(self._commands.close, 5.0)
         if not stopped:
             _log("[v3] 当前目标仍未返回，未强制结束；可稍后再退出")
+            self._resume_after_failed_stop()
             return False
         _log('[v3.shutdown] stage=queue_done')
         self.input_check.close()

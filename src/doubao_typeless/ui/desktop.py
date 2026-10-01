@@ -533,7 +533,9 @@ class ClientWindow:
 
         version = QLabel(preview_version_label())
         version.setObjectName("muted")
+        version.setWordWrap(True)
         cl.addWidget(version)
+        self.version_label = version
         self.delivery_status = QLabel("")
         self.delivery_status.setWordWrap(True)
         self.delivery_status.setProperty("role", "status")
@@ -576,15 +578,12 @@ class ClientWindow:
         self.device_box = QLabel("还没有手机连上。扫码后在这里批准插入和截图。")
         self.device_box.setWordWrap(True)
         cl.addWidget(self.device_box)
-        self.device_name = QLineEdit()
-        self.device_name.setPlaceholderText("给已连接的手机起个名字")
-        self.device_name.hide()
-        cl.addWidget(self.device_name)
         self.grant_row = QVBoxLayout()
         cl.addLayout(self.grant_row)
-        self.remember_box = QCheckBox("记住这台手机 30 天，下次自动续接")
-        self.remember_box.clicked.connect(self._toggle_remember)
-        cl.addWidget(self.remember_box)
+        self.device_note = QLabel("")
+        self.device_note.setWordWrap(True)
+        self.device_note.hide()
+        cl.addWidget(self.device_note)
         self.practice_toggle = QToolButton()
         self.practice_toggle.setText("试一段文字（可选）")
         self.practice_toggle.setCheckable(True)
@@ -593,7 +592,7 @@ class ClientWindow:
         cl.addWidget(self.practice_toggle)
         self.practice = QPlainTextEdit()
         self.practice.setPlaceholderText("可选：输入测试文字，再到「当前图文」预览。实际插入请选中外部输入框。")
-        self.practice.textChanged.connect(lambda: self.app.update_pc_text(self.practice.toPlainText()))
+        self.practice.textChanged.connect(self._practice_changed)
         self.practice.setFixedHeight(88)
         cl.addWidget(self.practice)
         self.practice.hide()
@@ -817,7 +816,7 @@ class ClientWindow:
         self.app.hud.register_companion(w)
         self._clipboard = QGuiApplication.clipboard()
         self._hist_sig = None
-        self._pairing_url = ""
+        self._pairing_url = None
         self.timer = QTimer(w)
         self.timer.timeout.connect(self._tick_countdown)
         self.timer.start(1000)
@@ -856,6 +855,13 @@ class ClientWindow:
     def pairing_url(self) -> str:
         code = self.app.auth.current_pairing_challenge() or self.app.auth.new_pairing_challenge()
         return pairing_page_url(self.phone_url(), code)
+
+    def _shown_pairing_url(self) -> str:
+        # 只有用户正看着连接页才新建配对挑战；后台同步/隐藏窗口不得持续产出可猜的新短码。
+        code = self.app.auth.current_pairing_challenge()
+        if code is None and self.widget.isVisible():
+            code = self.app.auth.new_pairing_challenge()
+        return pairing_page_url(self.phone_url(), code) if code else ""
 
     def copy_url(self) -> None:
         self._clipboard.setText(self.pairing_url())
@@ -1015,8 +1021,12 @@ class ClientWindow:
                 widget.deleteLater()
 
     def _pair_caption(self) -> str:
-        short = self.app.auth.current_short_code() or ""
+        if not self.app.auth.current_pairing_challenge():
+            return "扫码即连。二维码已过期，打开本窗口或点「重新配对」获取新码"
         remain = int(self.app.auth.pairing_remaining_s())
+        short = self.app.auth.current_short_code()
+        if not short:
+            return f"扫码即连。备用短码因多次输错已停用，扫码不受影响；点「重新配对」恢复  （{remain}s）"
         return f"扫码即连。备用短码 {short}  （{remain}s）"
 
     def _tick_countdown(self) -> None:
@@ -1035,43 +1045,84 @@ class ClientWindow:
             if hud._widget is not None and hud._widget.isVisible():
                 hud._apply_show()
 
-    def _toggle_remember(self) -> None:
-        if not self.remember_box.isChecked():
-            count = self.app.forget_connected()
-            self.device_box.setText(f"已忘记 {count} 台设备，下次需要重新配对。")
+    def _note(self, text: str) -> None:
+        self.device_note.setText(text)
+        self.device_note.setVisible(bool(text))
+
+    def _practice_changed(self) -> None:
+        if not self.app.update_practice_text(self.practice.toPlainText()):
+            # 已恢复手机主稿时练习文字不进入待插入内容，避免 Alt+I 插入看不见的副本。
+            self.practice.hide()
+            self.practice_toggle.hide()
+            self._note("电脑上已有手机稿，练习框已收起；请到「当前图文」查看或改字。")
+
+    def _toggle_remember(self, device_id: str, value: bool) -> None:
+        from doubao_typeless.storage.credentials import TrustStoreError
+
+        try:
+            if value:
+                ok = self.app.remember_device_id(device_id)
+                self._note("正在让这台手机保存配对，保存后 30 天内可自动续接。" if ok else "这台手机已离线或过期，请重新扫码后再记住。")
+            else:
+                self.app.unremember_device_id(device_id)
+                self._note("已取消记住这台手机；当前连接不断开，其它手机不受影响。")
+        except TrustStoreError:
+            self._note("电脑没能保存设备信任（磁盘不可写），这台手机保持原状；请检查后重试。")
+        self._session_sig = None
+        self.refresh()
+
+    def _save_nickname(self, device_id: str, editor) -> None:
+        name = editor.text().strip()
+        nicks = dict(load_settings(self.app.data_dir).get("device_nicknames") or {})
+        if (nicks.get(device_id) or "") == name:
             return
-        count = self.app.remember_connected()
-        self.device_box.setText(
-            (self.device_box.text() + "\n" if self.device_box.text() else "")
-            + (f"已记住 {count} 台设备，30 天内可直接续接。" if count else "还没有已连接的手机可记住。")
-        )
+        if name:
+            nicks[device_id] = name
+        else:
+            nicks.pop(device_id, None)
+        save_settings(self.app.data_dir, {"device_nicknames": nicks})
+        self._session_sig = None
+        self.refresh()
+
+    def _resolve_claim(self, device_id: str, approve: bool) -> None:
+        moved = self.app.resolve_asset_claim(device_id, approve)
+        self._note(f"已把 {moved} 张旧图交给这台手机。" if approve and moved else
+                   "已拒绝取回旧图；手机上的文字不受影响。" if not approve else "手机已离线，未转交旧图。")
+        self._session_sig = None
+        self.refresh()
 
     def refresh(self) -> None:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QListWidgetItem, QPushButton, QWidget, QHBoxLayout
+        from PySide6.QtWidgets import QListWidgetItem, QPushButton, QWidget, QHBoxLayout, QLineEdit
 
-        url = self.pairing_url()
-        if url != getattr(self, "_pairing_url", ""):
+        url = self._shown_pairing_url()
+        if url != getattr(self, "_pairing_url", None):
             self._pairing_url = url
             self.url_label.setText(self.phone_url())
             self.url_label.setToolTip("扫码已包含一次性配对信息，无需抄写长码")
-            pix = qr_pixmap(url)
-            if not pix.isNull():
+            pix = qr_pixmap(url) if url else None
+            if pix is not None and not pix.isNull():
                 self.qr.setPixmap(pix)
+            elif not url:
+                self.qr.clear()
+                self.qr.setText("二维码已过期\n打开窗口自动更新")
         self.code_label.setText(self._pair_caption())
         sessions = self.app.auth.public_sessions()
         online = self.app.bridge.online_device_ids()
+        claims = self.app.pending_asset_claims()
         self._refresh_phone_status()
-        sig = tuple((s["session_id"], s["allow_insert"], s["allow_capture"], s["device_id"] in online) for s in sessions)
+        phone_draft = self.app.draft.authority == "phone"
+        sig = (tuple((s["session_id"], s["device_id"], s["allow_insert"], s["allow_capture"], s["remembered"],
+                      s["remember_pending"], s["device_id"] in online, claims.get(s["device_id"], 0)) for s in sessions),
+               phone_draft)
         if sig != self._session_sig:
             self._session_sig = sig
             self._clear_grant_row()
             if not sessions:
                 self.qr.show()
-                self.practice_toggle.show()
-                self.practice.setVisible(self.practice_toggle.isChecked())
+                self.practice_toggle.setVisible(not phone_draft)
+                self.practice.setVisible(self.practice_toggle.isChecked() and not phone_draft)
                 self.device_box.setText("还没有手机连上。扫码后在这里批准插入和截图。")
-                self.device_name.hide()
             else:
                 self.qr.show()
                 self.practice.hide()
@@ -1081,36 +1132,54 @@ class ClientWindow:
                 nicks = load_settings(self.app.data_dir).get("device_nicknames") or {}
                 lines = []
                 for index, item in enumerate(sessions, start=1):
-                    name = device_label(item["device_id"], nicks, index)
+                    device = item["device_id"]
+                    name = device_label(device, nicks, index)
                     lines.append(
-                        f"{name} · {'在线' if item['device_id'] in online else '离线，电脑保留最后收到的稿'}  插入={'开' if item['allow_insert'] else '关'}  "
+                        f"{name} · {'在线' if device in online else '离线，电脑保留最后收到的稿'}  插入={'开' if item['allow_insert'] else '关'}  "
                         f"截图={'开' if item['allow_capture'] else '关'}"
+                        + (" · 等待手机保存配对" if item["remember_pending"] else " · 已记住" if item["remembered"] else "")
                     )
                     sid = item["session_id"]
+                    nickname = QLineEdit(str(nicks.get(device) or ""))
+                    nickname.setPlaceholderText(f"{name}（可改名）")
+                    nickname.setMaximumWidth(140)
+                    nickname.editingFinished.connect(lambda d=device, e=nickname: self._save_nickname(d, e))
                     allow_i = QPushButton("允许插入" if not item["allow_insert"] else "关闭插入")
                     allow_i.setObjectName("primary" if not item["allow_insert"] else "ghost")
                     allow_i.clicked.connect(lambda _=False, s=sid, v=not item["allow_insert"]: self.set_insert(s, v))
                     allow_c = QPushButton("允许截图" if not item["allow_capture"] else "关闭截图")
                     allow_c.setObjectName("ghost")
                     allow_c.clicked.connect(lambda _=False, s=sid, v=not item["allow_capture"]: self.set_capture(s, v))
+                    remembered = bool(item["remembered"])
+                    remember = QPushButton("取消记住" if remembered else "记住 30 天")
+                    remember.setObjectName("ghost")
+                    remember.setToolTip("只影响这一台手机")
+                    remember.clicked.connect(lambda _=False, d=device, v=not remembered: self._toggle_remember(d, v))
                     revoke = QPushButton("撤销设备")
                     revoke.setObjectName("danger")
                     revoke.clicked.connect(lambda _=False, s=sid: self.revoke(s))
                     row_widget = QWidget()
                     row = QHBoxLayout(row_widget)
                     row.setContentsMargins(0,0,0,0)
-                    row.addWidget(allow_i)
-                    row.addWidget(allow_c)
-                    row.addWidget(revoke)
+                    for widget in (nickname, allow_i, allow_c, remember, revoke):
+                        row.addWidget(widget)
                     self.grant_row.addWidget(row_widget)
-                self.device_name.show()
-                if not self.device_name.hasFocus():
-                    self.device_name.setText(device_label(sessions[0]["device_id"], nicks, 1))
+                    if claims.get(device):
+                        lines.append(f"{name} 请求取回之前连接上传的 {claims[device]} 张图（同一手机重新扫码后才需要）")
+                        approve = QPushButton(f"允许取回 {claims[device]} 张旧图")
+                        approve.setObjectName("primary")
+                        approve.clicked.connect(lambda _=False, d=device: self._resolve_claim(d, True))
+                        deny = QPushButton("拒绝")
+                        deny.setObjectName("ghost")
+                        deny.clicked.connect(lambda _=False, d=device: self._resolve_claim(d, False))
+                        claim_widget = QWidget()
+                        claim_row = QHBoxLayout(claim_widget)
+                        claim_row.setContentsMargins(0,0,0,0)
+                        claim_row.addWidget(approve)
+                        claim_row.addWidget(deny)
+                        claim_row.addStretch(1)
+                        self.grant_row.addWidget(claim_widget)
                 self.device_box.setText("\n".join(lines))
-                if any(item.get("remembered") for item in sessions):
-                    self.remember_box.blockSignals(True)
-                    self.remember_box.setChecked(True)
-                    self.remember_box.blockSignals(False)
         hist_sig = tuple(
             (item["bundle"].get("bundle_id"), item.get("attempt_result"))
             for item in self.app.history.items[-20:]
@@ -1135,22 +1204,36 @@ class ClientWindow:
             if restore_row is not None:
                 self.recent_list.setCurrentItem(restore_row)
 
-    def set_insert(self, session_id: str, value: bool) -> None:
-        self.app.auth.set_grants(session_id, allow_insert=value)
+    def _set_grants(self, session_id: str, **grants) -> None:
+        from doubao_typeless.storage.credentials import TrustStoreError
+
+        try:
+            self.app.auth.set_grants(session_id, **grants)
+        except TrustStoreError:
+            self._note("电脑没能保存授权变更（磁盘不可写），原授权不变；请检查后重试。")
+        except ValueError:
+            self._note("这台手机的连接已过期，请重新扫码。")
         self.refresh()
+
+    def set_insert(self, session_id: str, value: bool) -> None:
+        self._set_grants(session_id, allow_insert=value)
 
     def set_capture(self, session_id: str, value: bool) -> None:
-        self.app.auth.set_grants(session_id, allow_capture=value)
-        self.refresh()
+        self._set_grants(session_id, allow_capture=value)
 
     def revoke(self, session_id: str) -> None:
-        loop = getattr(self.app, "_loop", None)
-        if loop is not None:
-            import asyncio
+        from doubao_typeless.storage.credentials import TrustStoreError
 
-            asyncio.run_coroutine_threadsafe(self.app.bridge.revoke_session(session_id), loop).result(3)
-        else:
-            self.app.auth.revoke(session_id)
+        loop = getattr(self.app, "_loop", None)
+        try:
+            if loop is not None:
+                import asyncio
+
+                asyncio.run_coroutine_threadsafe(self.app.bridge.revoke_session(session_id), loop).result(3)
+            else:
+                self.app.auth.revoke(session_id)
+        except TrustStoreError:
+            self._note("电脑没能写入撤销记录（磁盘不可写），设备保持原状以免重启后自动续接；请检查后重试。")
         self.refresh()
 
     def save_settings(self) -> None:
@@ -1158,9 +1241,6 @@ class ClientWindow:
         if self.jev_settings.provider.currentData()=='custom' and not self.jev_settings.normalize_custom():return
         from doubao_typeless.services.endpoints import endpoint_origin
         nicks = dict(load_settings(self.app.data_dir).get("device_nicknames") or {})
-        sessions = self.app.auth.public_sessions()
-        if sessions and self.device_name.text().strip():
-            nicks[sessions[0]["device_id"]] = self.device_name.text().strip()
         payload = {
             "hotkey_insert": self.hotkey_insert.text().strip() or "<alt>+i",
             "hotkey_recall": self.hotkey_recall.text().strip() or "<alt>+<shift>+i",
@@ -1384,6 +1464,20 @@ class DesktopShell:
             QTimer.singleShot(0, host, show_error)
         elif event == "capture_region":
             QTimer.singleShot(0, host, self.app.capture_region)
+        elif event == "capture_unavailable":
+            text = {
+                "CAPTURE_NO_PHONE": "没有在线的手机，截图未发送。请先在手机打开页面。",
+                "CAPTURE_DENIED": "正在编辑的手机还没有截图权限。请在连接页点「允许截图」。",
+                "CAPTURE_TARGET_AMBIGUOUS": "有多台手机在线，无法确定发给哪台。请在要用的手机上点「截电脑」。",
+                "CAPTURE_TARGET_CHANGED": "框选期间手机已离线或权限变化，截图未发送。",
+            }.get(str(_kw.get("error_code") or ""), "截图未发送。")
+            QTimer.singleShot(0, host, lambda: self.tray.showMessage("截图给手机", text))
+        elif event == "asset_claim":
+            def show_claim():
+                self.client._session_sig = None
+                self.client.refresh()
+                self.tray.showMessage("手机请求取回旧图", "同一部手机重新扫码后需要你确认。请在连接页允许或拒绝。")
+            QTimer.singleShot(0, host, show_claim)
         elif event == "composer_located":
             def reveal_target():
                 from doubao_typeless.app import _log
@@ -1477,7 +1571,7 @@ class DesktopShell:
                     self.client.update_install.setEnabled(True)
                     self.client.update_button.setEnabled(True)
                     self.client.update_status.setText('当前操作尚未结束，本次升级已撤销；稍后可重试')
-                self.tray.showMessage("暂未退出", "目标程序尚未返回，未强制终止。请稍后再点退出。")
+                self.tray.showMessage("暂未退出", "目标程序尚未返回，未强制终止。当前版本继续可用，热键已恢复；可稍后再点退出。")
                 return
             self.client._closing_for_quit = True
             self.tray.hide()
@@ -1564,22 +1658,16 @@ def run_desktop(argv: list[str] | None = None) -> int:
         loop = app.start_background(start_hud=False)
         app._loop = loop
         try:
-            from doubao_typeless.platform.desktop import start_hotkeys
-
             stored = load_settings(app.data_dir)
-            start = start_hotkeys(
-                on_insert=app.request_insert,
-                on_recall=app.request_recall,
-                on_expand=lambda: app._notify_ui("expand"),
-                on_region=lambda: app._notify_ui("capture_region"),
-                insert_combo=str(stored.get("hotkey_insert") or "<alt>+i"),
-                recall_combo=str(stored.get("hotkey_recall") or "<alt>+<shift>+i"),
-                expand_combo=str(stored.get("hotkey_expand") or "<alt>+<shift>+e"),
-                capture_combo=str(stored.get("hotkey_capture") or "<alt>+<shift>+s"),
+            # 经 apply_hotkeys 记录组合键，退出超时恢复时才能按原设置重新注册。
+            failures = app.apply_hotkeys(
+                str(stored.get("hotkey_insert") or "<alt>+i"),
+                str(stored.get("hotkey_recall") or "<alt>+<shift>+i"),
+                expand=str(stored.get("hotkey_expand") or "<alt>+<shift>+e"),
+                capture=str(stored.get("hotkey_capture") or "<alt>+<shift>+s"),
             )
-            app._hotkeys = start
-            if start.get("failures"):
-                logger(f"[v3] 热键注册失败: {start['failures']}")
+            if failures:
+                logger(f"[v3] 热键注册失败: {failures}")
         except Exception as exc:
             logger(f"[v3] 热键未启动: {exc}")
         shell.client.refresh()

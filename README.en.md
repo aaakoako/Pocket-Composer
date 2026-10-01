@@ -12,7 +12,7 @@
 
 Explaining a UI problem, describing a coding task or sketching an idea can be easier on your phone. Pocket Composer combines your phone keyboard, screenshot annotation and a whiteboard, then inserts prepared images and text into a Windows input field.
 
-**Windows stable: 0.5.5. macOS/Linux remain previews.** [Release notes](docs/release/0.5.5-stable.md)
+**Windows stable: 0.5.6. macOS/Linux remain previews.** [Release notes](docs/release/0.5.6-reconnect.md)
 
 <table><tr><th>Express on your phone</th><th>Continue on your computer</th></tr><tr><td align="center"><img src="docs/images/product/phone.png" width="270" alt="0.5.5 preview phone composer and sync status" /></td><td align="center"><img src="docs/images/product/hud.png" width="430" alt="0.5.5 preview input-first desktop overlay" /><br/><br/>Read, edit, copy and insert.<br/>Expand assistance only when wanted.</td></tr></table>
 
@@ -80,3 +80,4 @@ Pocket Composer is independent and does not claim affiliation with Doubao, ByteD
 Include your versions, browser/input method, steps and sanitized screenshots in [issues](https://github.com/aaakoako/Pocket-Composer/issues). Do not include API keys, pairing credentials or private drafts.
 
 [Build and verify](docs/release/v3-build.md) · [Changelog](CHANGELOG.md)
+
