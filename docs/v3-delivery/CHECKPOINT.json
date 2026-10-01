@@ -5,8 +5,8 @@
   "working_tree": "fix/remembered-phone-reconnect；基于公开 0.5.5 的 acc643d；未覆盖日用数据或发布版本",
   "source_base": "5198c5c888af9541e118d82dc1026655abb9dceb",
   "last_completed_slice": "REMEMBERED_PHONE_RECONNECT",
-  "active_slice": "PACKAGE_RECONNECT_CANDIDATE",
-  "next_action": "生成隔离候选包并检查启动；真实手机后台冻结及跨 Wi-Fi 续接仍需实机验收",
+  "active_slice": null,
+  "next_action": "0.5.6 候选已在 G:\\AgentStorage\\Deliveries\\PocketComposer-0.5.6-reconnect；来源 221500b。真实 EXE 退出重启后手机自动续接通过，真实手机后台冻结及跨 Wi-Fi 续接仍需实机验收；PR #12 未合并，未发布正式更新。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
