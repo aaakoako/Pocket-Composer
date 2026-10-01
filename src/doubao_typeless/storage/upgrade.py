@@ -23,9 +23,11 @@ def prepare_upgrade(data_dir: Path, *, version: str) -> Path | None:
     backup_root = data_dir / 'upgrade-backups'
     if linked(backup_root):
         raise RuntimeError('备份位置是外部链接，升级已停止；原数据未修改。')
-    # Includes encrypted secrets, recovery and consumed send actions. Logs and
-    # transient connection/lock/WAL files are not independent persisted records.
-    entries = [p for p in data_dir.iterdir() if p.name not in {'upgrade-backups', 'logs', 'instance.lock', 'pair.txt'}
+    # Includes encrypted secrets, recovery and consumed send actions. Logs,
+    # transient connection/lock/WAL files and re-downloadable update packages
+    # are not independent persisted records.
+    entries = [p for p in data_dir.iterdir()
+               if p.name not in {'upgrade-backups', 'logs', 'instance.lock', 'pair.txt', 'updates'}
                and not p.name.endswith(('-wal', '-shm', '.tmp'))]
     for entry in entries:
         if linked(entry):
@@ -50,15 +52,20 @@ def prepare_upgrade(data_dir: Path, *, version: str) -> Path | None:
             else:
                 shutil.copy2(src, dst)
             return dst
-        for entry in entries:
-            target = backup / entry.name
-            if entry.is_dir():
-                shutil.copytree(entry, target, copy_function=copy_file)
-            else:
-                copy_file(entry, target)
-        (backup / 'backup-complete.json').write_text(json.dumps({
-            'schema':1, 'from':previous.get('version', 'unversioned'), 'to':version,
-            'entries':[p.name for p in entries]}, ensure_ascii=False), encoding='utf-8')
+        try:
+            for entry in entries:
+                target = backup / entry.name
+                if entry.is_dir():
+                    shutil.copytree(entry, target, copy_function=copy_file)
+                else:
+                    copy_file(entry, target)
+            (backup / 'backup-complete.json').write_text(json.dumps({
+                'schema':1, 'from':previous.get('version', 'unversioned'), 'to':version,
+                'entries':[p.name for p in entries]}, ensure_ascii=False), encoding='utf-8')
+        except BaseException:
+            # 只删除本次新建、尚未完成的备份目录；原数据与以往完整备份不动。
+            shutil.rmtree(backup, ignore_errors=True)
+            raise
     temp = marker.with_suffix('.tmp')
     temp.write_text(json.dumps({'schema':1, 'version':version, 'backup':backup.name if backup else None}), encoding='utf-8')
     temp.replace(marker)

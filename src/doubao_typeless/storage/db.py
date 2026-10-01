@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS attempt_steps (
     evidence TEXT,
     PRIMARY KEY (attempt_id, idx)
 );
+CREATE TABLE IF NOT EXISTS intents (
+    intent_id TEXT PRIMARY KEY,
+    result TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
     session_id TEXT,
@@ -93,6 +98,17 @@ class V3DB:
         with self._lock:
             row = self.conn.execute("SELECT * FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
             return dict(row) if row else None
+
+    def transfer_asset_owner(self, asset_ids: list[str], *, from_owner: str, to_owner: str) -> list[str]:
+        """只转移仍属于 from_owner 的素材；返回实际转移的素材号。"""
+        moved: list[str] = []
+        with self._lock, self.conn:
+            for asset_id in asset_ids:
+                cur = self.conn.execute("UPDATE assets SET owner_session_id=? WHERE asset_id=? AND owner_session_id=?",
+                                        (to_owner, asset_id, from_owner))
+                if cur.rowcount:
+                    moved.append(asset_id)
+        return moved
 
     def mark_referenced(self, asset_id: str, referenced: bool = True) -> None:
         with self._lock:
@@ -197,6 +213,22 @@ class V3DB:
                     }
                 )
             return items
+
+    INTENT_KEEP = 2048
+
+    def record_intent(self, intent_id: str, result: str) -> None:
+        """插入意图的结果跨重启保留：重启后同一意图仍按原结果判重，不重贴。"""
+        with self._lock, self.conn:
+            self.conn.execute("INSERT OR REPLACE INTO intents(intent_id, result, updated_at) VALUES (?,?,?)",
+                              (intent_id, result, time.time()))
+            self.conn.execute("DELETE FROM intents WHERE intent_id NOT IN "
+                              "(SELECT intent_id FROM intents ORDER BY updated_at DESC LIMIT ?)", (self.INTENT_KEEP,))
+
+    def recent_intents(self) -> list[tuple[str, str]]:
+        with self._lock:
+            rows = self.conn.execute("SELECT intent_id, result FROM intents ORDER BY updated_at ASC LIMIT ?",
+                                     (self.INTENT_KEEP,)).fetchall()
+        return [(row["intent_id"], row["result"]) for row in rows]
 
     def record_attempt(self, attempt_id: str, bundle_id: str, result: str, steps: list[dict]) -> None:
         with self._lock:

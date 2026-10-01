@@ -27,7 +27,10 @@ def preview_version_label() -> str:
     from doubao_typeless.build_info import build_info
     info = build_info()
     label = {"v3-private-trial":"隔离体验版", "release-candidate":"发布候选", "stable":"正式版"}[info["channel"]]
-    return f"Pocket Composer {info['version']} · {label} · {info['source_sha'][:8]}"
+    sha = str(info.get("source_sha") or "")
+    # 只有 40 位提交号才截短；源码运行的 "development" 原样显示为开发构建，不截成半个词。
+    source = sha[:8] if len(sha) == 40 else "开发构建"
+    return f"Pocket Composer {info['version']} · {label} · {source}"
 
 
 def check_preview_update(*, get_json: Callable[[str], dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -106,6 +109,33 @@ def release_package(release: dict) -> dict | None:
             'sha256':sha, 'checksums_url':base+'SHA256SUMS.txt' if sums else ''}
 
 
+STAGING_KEEP_S = 600
+
+
+def prune_update_staging(data_dir: Path, *, keep_recent_s: float = STAGING_KEEP_S, now: float | None = None) -> int:
+    """删除可重新下载的旧升级暂存目录。最近的、仍被占用的、链接或非本程序命名的都跳过。"""
+    root = Path(data_dir) / 'updates'
+    if not root.is_dir() or root.is_symlink() or (hasattr(root, 'is_junction') and root.is_junction()):
+        return 0
+    now = time.time() if now is None else now
+    removed = 0
+    for entry in root.iterdir():
+        try:
+            if not re.fullmatch(r'[0-9a-f]{32}', entry.name) or entry.is_symlink() or \
+                    (hasattr(entry, 'is_junction') and entry.is_junction()) or not entry.is_dir():
+                continue
+            if now - entry.stat().st_mtime < keep_recent_s:
+                continue
+            for child in entry.iterdir():
+                # 升级程序仍在运行时其文件被占用，删除失败即保留整个目录。
+                child.unlink()
+            entry.rmdir()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def download_upgrade(package: dict, data_dir: Path, *, progress=None, cancelled=None, client=None) -> Path:
     """Only a complete hash-verified native package can leave the staging directory."""
     import httpx
@@ -115,6 +145,7 @@ def download_upgrade(package: dict, data_dir: Path, *, progress=None, cancelled=
     if not re.fullmatch(r'\d+\.\d+\.\d+', version) or package.get('url') not in {
         prefix+version+'/DoubaoTypeless.exe', prefix+'v'+version+'/DoubaoTypeless.exe'}:
         raise ValueError('更新地址无效，请重新检查更新')
+    prune_update_staging(data_dir)
     stage = Path(data_dir)/'updates'/uuid.uuid4().hex
     stage.mkdir(parents=True)
     part = stage/'download.part'

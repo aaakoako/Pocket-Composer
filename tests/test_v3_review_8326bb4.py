@@ -118,7 +118,9 @@ def test_native_region_route_must_pass_granted_session(tmp_path, monkeypatch):
     region.select_region = lambda: (0, 0, 100, 100)
     monkeypatch.setitem(__import__("sys").modules, region.__name__, region)
     app = V3App(data_dir=tmp_path / "data", port=0)
-    app.auth.sessions["s"] = N(allow_capture=True, session_id="s")
+    # 截图只发给在线、未过期、有截图权限的手机；桩会话需具备这些属性。
+    app.auth.sessions["s"] = N(allow_capture=True, session_id="s", device_id="d", expires_at=__import__("time").time() + 60)
+    monkeypatch.setattr(app.bridge, "online_device_ids", lambda: {"d"})
     seen = {}
 
     def capture(scope, request_id="", session=None):

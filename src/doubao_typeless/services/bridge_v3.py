@@ -17,9 +17,10 @@ from aiohttp import web, WSMsgType, WSCloseCode
 
 from doubao_typeless.core.bundle import Draft, apply_draft_update, freeze_bundle
 from doubao_typeless.storage.asset_store import AssetStore
-from doubao_typeless.storage.credentials import AuthService, looks_like_key_script
+from doubao_typeless.storage.credentials import (AuthService, PairingError, TrustStoreError,
+                                                 validate_client_message)
 from doubao_typeless.ui.tokens import should_wake
-from doubao_typeless.services.assets import UploadService, resolve_asset_refs
+from doubao_typeless.services.assets import SAFE_ID, UploadService, resolve_asset_refs
 
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -44,6 +45,15 @@ WEB_DIST = _web_dist()
 AUTH_DEADLINE_S = 5.0
 WS_RATE_LIMIT = 40
 WS_RATE_WINDOW_S = 2.0
+# 换 WiFi/断网的手机收不到 ping，最多 heartbeat*1.5 秒后电脑侧显示离线。
+WS_HEARTBEAT_S = 20.0
+CORRELATION_FIELDS = ("update_id", "intent_id", "request_id")
+
+
+class AssetOwnerError(ValueError):
+    def __init__(self, asset_ids: list[str]):
+        super().__init__("ASSET_OWNER")
+        self.asset_ids = asset_ids
 
 
 def peer_host(request: web.Request) -> str:
@@ -103,6 +113,7 @@ class V3Bridge:
         data_dir: Path | None = None,
         phone_send=None,
         on_send=None,
+        on_asset_claim: Callable[[str, list], None] | None = None,
     ):
         self.port = port
         self.auth = auth
@@ -127,7 +138,9 @@ class V3Bridge:
         self._ws_auth: dict[int, Any] = {}
         self._ws_rate: dict[int, list[float]] = {}
         self.last_phone_event: dict[str, Any] | None = None
-        self._prepare_waiters: dict[str, tuple[str, asyncio.Future]] = {}
+        self._prepare_waiters: dict[str, tuple[str, asyncio.Future, dict]] = {}
+        self._on_asset_claim = on_asset_claim
+        self._asset_claims: dict[str, dict] = {}
 
     @web.middleware
     async def _origin_host_gate(self, request: web.Request, handler):
@@ -272,8 +285,28 @@ class V3Bridge:
         )
 
     def _require_loopback(self, request: web.Request) -> web.Response | None:
+        """电脑管理接口：本机来源、本机 Host、同源（或无 Origin 的本机程序）、JSON 请求体。
+
+        局域网网页的 Origin 也是私网地址，所以这里不能沿用手机接口的私网规则。
+        """
         if not is_loopback_host(peer_host(request)):
             return web.json_response({"error": "pc only"}, status=403)
+        host_header = request.headers.get("Host", "")
+        if not is_loopback_host(hostname_from_host_header(host_header)):
+            return web.json_response({"error": "pc only"}, status=403)
+        origin = request.headers.get("Origin", "")
+        if origin:
+            parsed = urlparse(origin)
+            try:
+                origin_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                served_port = urlparse("//" + host_header).port or 80
+            except ValueError:
+                origin_port, served_port = -1, -2
+            if not is_loopback_host(parsed.hostname or "") or origin_port != served_port:
+                return web.json_response({"error": "pc only"}, status=403)
+        if request.method not in {"GET", "HEAD"} and request.can_read_body:
+            if request.content_type != "application/json":
+                return web.json_response({"error": "json required"}, status=415)
         return None
 
     async def _pc(self, request: web.Request) -> web.Response:
@@ -302,6 +335,8 @@ class V3Bridge:
                 allow_insert=body.get("allow_insert"),
                 allow_capture=body.get("allow_capture"),
             )
+        except TrustStoreError as exc:
+            return web.json_response({"error": str(exc)}, status=507)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
         return web.json_response(
@@ -324,11 +359,14 @@ class V3Bridge:
                 return False
         return False
 
-    async def publish_phone_event(self, event: dict[str, Any]) -> None:
+    async def publish_phone_event(self, event: dict[str, Any], *, persist: bool = True) -> None:
         self.last_phone_event = event
-        if self.data_dir is not None:
+        if persist and self.data_dir is not None:
             from doubao_typeless.storage.draft_snapshot import write_json_atomic
-            write_json_atomic(self.data_dir / "phone-event.json", event)
+            try:
+                write_json_atomic(self.data_dir / "phone-event.json", event)
+            except OSError as exc:
+                self._log(f"[v3.receipt] persist_failed {type(exc).__name__}")
         for ws in list(self._clients):
             if id(ws) not in self._ws_auth:
                 continue
@@ -345,23 +383,86 @@ class V3Bridge:
                 if not ws.closed and (bound := self._ws_auth.get(id(ws))) is not None
                 and bound.session_id in self.auth.sessions}
 
+    def _device_sockets(self, device_id: str) -> list[web.WebSocketResponse]:
+        return [ws for ws in list(self._clients)
+                if not ws.closed and (bound := self._ws_auth.get(id(ws))) is not None
+                and bound.device_id == device_id and bound.session_id in self.auth.sessions]
+
+    async def send_to_device(self, device_id: str, payload: dict[str, Any]) -> int:
+        sent = 0
+        for ws in self._device_sockets(device_id):
+            try:
+                await ws.send_json(payload)
+                sent += 1
+            except Exception:
+                pass
+        return sent
+
     async def prepare_phone(self, device_id: str) -> dict:
+        """同一手机可能开着多个页面：向全部页面询问，第一个成功准备的当前页面胜出。
+
+        后台旧页面会回 PHONE_NOT_CURRENT 或不回；只有全部页面都失败才算失败。
+        """
         request_id = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
-        self._prepare_waiters[request_id] = (device_id, future)
+        sockets = self._device_sockets(device_id)
+        if not sockets:
+            raise ValueError("PHONE_OFFLINE")
+        self._prepare_waiters[request_id] = (device_id, future, {"pending": len(sockets), "error": None})
         try:
-            sent = False
-            for ws in list(self._clients):
-                bound = self._ws_auth.get(id(ws))
-                if bound and bound.device_id == device_id and not ws.closed:
+            delivered = 0
+            for ws in sockets:
+                try:
                     await ws.send_json({"type": "draft.prepare", "request_id": request_id})
-                    sent = True
-                    break
-            if not sent:
+                    delivered += 1
+                except Exception:
+                    pass
+            if not delivered:
                 raise ValueError("PHONE_OFFLINE")
+            self._prepare_waiters[request_id][2]["pending"] = delivered
             return await asyncio.wait_for(future, timeout=6)
         finally:
             self._prepare_waiters.pop(request_id, None)
+
+    def asset_claims(self) -> dict[str, list[str]]:
+        return {device: list(item["asset_ids"]) for device, item in self._asset_claims.items()}
+
+    def _request_asset_claim(self, session, asset_ids: list[str]) -> list[str]:
+        """新配对的同一部手机丢了旧凭据：只登记等待电脑明确批准，不自动转移。"""
+        online = self.online_device_ids()
+        eligible = []
+        for aid, owner in self._foreign_assets(asset_ids[:16], session):
+            owner_device = owner[7:] if owner.startswith("device:") else \
+                getattr(self.auth.sessions.get(owner), "device_id", "")
+            if owner_device and owner_device in online:
+                continue  # 另一台在线手机的图不能被认领。
+            eligible.append(aid)
+        if eligible:
+            self._asset_claims[session.device_id] = {"asset_ids": eligible, "at": time.time()}
+            if self._on_asset_claim:
+                self._on_asset_claim(session.device_id, list(eligible))
+        return eligible
+
+    async def resolve_asset_claim(self, device_id: str, approve: bool) -> list[str]:
+        claim = self._asset_claims.pop(device_id, None)
+        if claim is None:
+            return []
+        moved: list[str] = []
+        db = getattr(self.uploads, "db", None)
+        if approve and db is not None and self._device_sockets(device_id):
+            online = self.online_device_ids()
+            for aid in claim["asset_ids"]:
+                row = db.asset_by_id(aid)
+                owner = str((row or {}).get("owner_session_id") or "")
+                owner_device = owner[7:] if owner.startswith("device:") else \
+                    getattr(self.auth.sessions.get(owner), "device_id", "")
+                if owner_device and owner_device in online and owner_device != device_id:
+                    continue
+                if owner and owner != "device:" + device_id:
+                    moved += db.transfer_asset_owner([aid], from_owner=owner, to_owner="device:" + device_id)
+        await self.send_to_device(device_id, {"type": "asset.claimed" if moved else "asset.claim_denied",
+                                              "asset_ids": moved})
+        return moved
 
     async def revoke_session(self, session_id: str) -> bool:
         removed = self.auth.revoke(session_id)
@@ -384,7 +485,10 @@ class V3Bridge:
         if denied:
             return denied
         body = await request.json()
-        removed = await self.revoke_session(str(body.get("session_id") or ""))
+        try:
+            removed = await self.revoke_session(str(body.get("session_id") or ""))
+        except TrustStoreError as exc:
+            return web.json_response({"error": str(exc), "ok": False}, status=507)
         return web.json_response({"ok": removed})
 
     async def _byok_get(self, request: web.Request) -> web.Response:
@@ -510,12 +614,27 @@ class V3Bridge:
         return web.json_response({"pairing": True, "error": "challenge is desktop-only"}, status=403)
 
     async def _pair_post(self, request: web.Request) -> web.Response:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return web.json_response({"error": "invalid request"}, status=400)
         try:
             if body.get("device_id") and body.get("device_secret"):
                 session = self.auth.resume_trusted(str(body.get("device_id") or ""), str(body.get("device_secret") or ""))
             else:
-                session = self.auth.complete_pairing(str(body.get("code") or ""))
+                previous = body.get("previous") if isinstance(body.get("previous"), dict) else None
+                session = self.auth.complete_pairing(str(body.get("code") or ""), source=peer_host(request),
+                                                     previous=previous)
+        except PairingError as exc:
+            status = 429 if exc.code == "PAIRING_LOCKED" else 400
+            payload = {"error": str(exc), "error_code": exc.code}
+            headers = {}
+            if exc.retry_after:
+                payload["retry_after"] = int(exc.retry_after + 0.999)
+                headers["Retry-After"] = str(payload["retry_after"])
+            return web.json_response(payload, status=status, headers=headers)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
         return web.json_response(
@@ -532,8 +651,14 @@ class V3Bridge:
     async def _device_remember(self, request: web.Request) -> web.Response:
         if not is_loopback_host(peer_host(request)):
             return web.json_response({"error": "remember on desktop"}, status=403)
+        denied = self._require_loopback(request)
+        if denied:
+            return denied
         session = self._session_from(request)
-        secret = self.auth.remember_device(session)
+        try:
+            secret = self.auth.remember_device(session)
+        except TrustStoreError as exc:
+            return web.json_response({"error": str(exc), "remembered": False}, status=507)
         return web.json_response(
             {
                 "device_id": session.device_id,
@@ -582,16 +707,55 @@ class V3Bridge:
         except ValueError as exc:
             raise web.HTTPUnauthorized(text=str(exc)) from exc
 
-    def _validate_ref_owners(self, data: dict, session) -> None:
+    def _foreign_assets(self, asset_ids, session) -> list[tuple[str, str]]:
         db = getattr(self.uploads, "db", None)
         if db is None:
-            return
-        refs = data.get("asset_refs") or []
-        for aid in refs:
-            row = db.asset_by_id(str(aid))
+            return []
+        out = []
+        for aid in dict.fromkeys(str(a) for a in asset_ids if a):
+            row = db.asset_by_id(aid)
             owner = str((row or {}).get("owner_session_id") or "")
             if owner and owner not in {session.session_id, "device:" + session.device_id}:
-                raise ValueError("asset owner")
+                out.append((aid, owner))
+        return out
+
+    def _validate_ref_owners(self, data: dict, session) -> None:
+        refs = list(data.get("asset_refs") or [])
+        refs += [d.get("asset_id") for d in data.get("asset_documents") or [] if isinstance(d, dict)]
+        foreign = self._foreign_assets(refs, session)
+        if foreign:
+            raise AssetOwnerError([aid for aid, _owner in foreign])
+
+    def _error_reply(self, data: dict, error: str, **extra) -> dict:
+        reply = {"type": "error", "error": error, **extra}
+        if isinstance(data, dict):
+            for name in CORRELATION_FIELDS:
+                if isinstance(data.get(name), str):
+                    reply[name] = data[name]
+            if isinstance(data.get("type"), str):
+                reply["request_type"] = data["type"]
+        return reply
+
+    def _mirror(self) -> dict:
+        owner = self.draft.editor_device_id
+        return {"authority": self.draft.authority, "draft_id": self.draft.draft_id,
+                "epoch": self.draft.epoch, "revision": self.draft.revision, "owner_device_id": owner,
+                "owner_online": owner in self.online_device_ids()}
+
+    def _mirror_snapshot(self, session) -> dict:
+        """电脑镜像全文，供手机明确选择「采用电脑这份」；图片只标出本机能否读取，不转移归属。"""
+        foreign = {aid for aid, _owner in self._foreign_assets(
+            [a.get("asset_id") for a in self.draft.assets], session)}
+        assets = [{"id": str(a.get("local_id") or a.get("asset_id") or ""),
+                   "asset_id": str(a.get("asset_id") or ""),
+                   "status": str(a.get("status") or "ready"),
+                   "render_revision": int(a.get("render_revision") or 1),
+                   "caption": str(a.get("caption") or ""),
+                   "width": a.get("width"), "height": a.get("height"),
+                   "accessible": bool(a.get("asset_id")) and a.get("asset_id") not in foreign}
+                  for a in self.draft.assets]
+        return {**self._mirror(), "generation": self.draft.generation, "text": self.draft.text,
+                "assets": assets}
 
     async def _asset_post(self, request: web.Request) -> web.Response:
         session = self._session_from(request)
@@ -674,13 +838,18 @@ class V3Bridge:
     async def _asset_get(self, request: web.Request) -> web.StreamResponse:
         session = self._session_from(request)
         asset_id = request.match_info["asset_id"]
+        if not SAFE_ID.fullmatch(asset_id) or len(asset_id) > 128:
+            raise web.HTTPNotFound()
         db = getattr(self.uploads, "db", None)
         if db is not None:
             row = db.asset_by_id(asset_id)
             owner = str((row or {}).get("owner_session_id") or "")
             if owner and owner not in {session.session_id, "device:" + session.device_id}:
-                raise web.HTTPForbidden(text="asset owner")
-        blob = self.store.get(asset_id)
+                raise web.HTTPForbidden(text="ASSET_OWNER")
+        try:
+            blob = self.store.get(asset_id)
+        except (FileNotFoundError, ValueError):
+            raise web.HTTPNotFound()
         return web.Response(
             body=blob,
             content_type="image/png",
@@ -707,7 +876,7 @@ class V3Bridge:
         return web.json_response(event or {})
 
     async def _ws(self, request: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse(max_msg_size=256 * 1024)
+        ws = web.WebSocketResponse(max_msg_size=256 * 1024, heartbeat=WS_HEARTBEAT_S)
         await ws.prepare(request)
         self._clients.add(ws)
         authorized = False
@@ -730,12 +899,18 @@ class V3Bridge:
                     break
                 if msg.type != WSMsgType.TEXT:
                     continue
-                data = json.loads(msg.data)
-                if looks_like_key_script(data):
-                    await ws.send_json({"type": "error", "error": "forbidden payload"})
+                try:
+                    data = json.loads(msg.data)
+                except ValueError:
+                    await ws.send_json({"type": "error", "error": "INVALID_MESSAGE"})
+                    continue
+                # 只看协议类型与字段结构；正文/图注里的 PowerShell、cmd.exe 是普通内容。
+                rejected = validate_client_message(data)
+                if rejected:
+                    await ws.send_json(self._error_reply(data, rejected))
                     continue
                 if not self._rate_ok(ws):
-                    await ws.send_json({"type": "error", "error": "rate limited"})
+                    await ws.send_json(self._error_reply(data, "rate limited"))
                     continue
                 authorized = await self._handle(ws, data, authorized)
         finally:
@@ -843,16 +1018,16 @@ class V3Bridge:
             )
             return True
         if not authorized:
-            await ws.send_json({"type": "error", "error": "unauthorized"})
+            await ws.send_json(self._error_reply(data, "unauthorized"))
             return False
         live = self._ws_auth.get(id(ws))
         if live is None or live.session_id not in self.auth.sessions:
-            await ws.send_json({"type": "error", "error": "session revoked"})
+            await ws.send_json(self._error_reply(data, "session revoked"))
             return False
         try:
             self.auth.authorize(live.session_id, live.token, "sync")
         except ValueError:
-            await ws.send_json({"type": "error", "error": "session revoked"})
+            await ws.send_json(self._error_reply(data, "session revoked"))
             return False
         if self.paused and kind in {
             "draft.update",
@@ -861,7 +1036,7 @@ class V3Bridge:
             "insert.intent",
             "capture.request",
         }:
-            await ws.send_json({"type": "error", "error": "paused"})
+            await ws.send_json(self._error_reply(data, "paused"))
             return True
         try:
             if data.get("assets") is not None:
@@ -875,17 +1050,30 @@ class V3Bridge:
                 pending = self._prepare_waiters.get(str(data.get("request_id") or ""))
                 if not pending or pending[0] != live.device_id:
                     return True  # 过期/不属于此手机的准备结果绝不触发插入。
-                future = pending[1]
+                future, tally = pending[1], pending[2]
+                if future.done():
+                    return True
                 try:
                     if data.get("error"):
                         raise ValueError("PHONE_NOT_CURRENT")
                     self._apply_primary(data)
                     freeze_bundle(self.draft, bundle_id="preparation-only")
-                    if not future.done():
-                        future.set_result({"revision": self.draft.revision})
+                    future.set_result({"revision": self.draft.revision})
                 except Exception as exc:
-                    if not future.done():
-                        future.set_exception(exc)
+                    # 旧标签页的失败不能挡住同一手机当前页面的成功回复。
+                    tally["pending"] -= 1
+                    tally["error"] = tally["error"] or exc
+                    if tally["pending"] <= 0:
+                        future.set_exception(tally["error"])
+                return True
+            if kind == "mirror.request":
+                await ws.send_json({"type": "mirror.snapshot", "request_id": data.get("request_id"),
+                                    **self._mirror_snapshot(live)})
+                return True
+            if kind == "asset.claim":
+                eligible = self._request_asset_claim(live, list(data.get("asset_ids") or []))
+                await ws.send_json({"type": "asset.claim_pending" if eligible else "asset.claim_denied",
+                                    "request_id": data.get("request_id"), "asset_ids": eligible})
                 return True
             if kind == "draft.update":
                 if data.get("authority") == "phone":
@@ -921,7 +1109,7 @@ class V3Bridge:
                 return True
             if kind == "bundle.commit":
                 if self._is_pc_editing() and self.draft.authority != "phone":
-                    await ws.send_json({"type": "error", "error": "pc_editing", "message": "电脑正在改字"})
+                    await ws.send_json(self._error_reply(data, "pc_editing", message="电脑正在改字"))
                     return True
                 self._require_draft_identity(data)
                 if "text" in data or "revision" in data:
@@ -932,7 +1120,7 @@ class V3Bridge:
                 try:
                     bundle = freeze_bundle(self.draft, bundle_id=str(uuid.uuid4()))
                 except ValueError as exc:
-                    await ws.send_json({"type": "error", "error": str(exc)})
+                    await ws.send_json(self._error_reply(data, str(exc)))
                     return True
                 self._prepared_bundle = bundle
                 public = {k: v for k, v in bundle.items() if k != "bytes_data"}
@@ -940,7 +1128,7 @@ class V3Bridge:
                 return True
             if kind == "insert.intent":
                 if self._is_pc_editing() and self.draft.authority != "phone":
-                    await ws.send_json({"type": "error", "error": "pc_editing", "message": "电脑正在改字"})
+                    await ws.send_json(self._error_reply(data, "pc_editing", message="电脑正在改字"))
                     return True
                 if data.get("session_id") != live.session_id:
                     raise ValueError("session mismatch")
@@ -955,14 +1143,18 @@ class V3Bridge:
                 try:
                     frozen = freeze_bundle(self.draft, bundle_id=str(uuid.uuid4()))
                 except ValueError as exc:
-                    await ws.send_json({"type": "error", "error": str(exc)})
+                    await ws.send_json(self._error_reply(data, str(exc)))
                     return True
                 status = {"result": "RUNNING"}
                 if self._on_intent:
                     status = await self._call_result(self._on_intent, data, frozen) or status
-                await ws.send_json({"type": "attempt.status", **status})
-                if status.get("phone_event"):
-                    await self.publish_phone_event(status["phone_event"])
+                try:
+                    await ws.send_json({"type": "attempt.status", **status})
+                finally:
+                    # 本连接断了也要让同设备其它页面收到；回执已由投递方落盘时不再重复写。
+                    if status.get("phone_event"):
+                        await self.publish_phone_event(status["phone_event"],
+                                                       persist=not status.get("receipt_saved"))
                 return True
             if kind == "capture.request":
                 request_id = str(data.get("request_id") or "")[:128]
@@ -1010,18 +1202,18 @@ class V3Bridge:
                 )
                 return True
             if kind == "byok.request":
-                await ws.send_json({"type": "error", "error": "byok stays on desktop"})
+                await ws.send_json(self._error_reply(data, "byok stays on desktop"))
                 return True
         except (ValueError, KeyError, TypeError) as exc:
-            await ws.send_json({"type": "error", "error": str(exc) if isinstance(exc, ValueError) else "invalid request",
-                                "update_id": data.get("update_id"),
-                                "mirror": {"authority":self.draft.authority,"draft_id":self.draft.draft_id,
-                                           "epoch":self.draft.epoch,"revision":self.draft.revision,
-                                           "owner_device_id":self.draft.editor_device_id}})
+            extra = {"mirror": self._mirror()}
+            if isinstance(exc, AssetOwnerError):
+                extra["asset_ids"] = exc.asset_ids
+            await ws.send_json(self._error_reply(
+                data, str(exc) if isinstance(exc, ValueError) else "invalid request", **extra))
             return authorized
         except Exception as exc:
             self._log(f"[v3.bridge] request error_type={type(exc).__name__}")
-            await ws.send_json({"type": "error", "error": "REQUEST_FAILED"})
+            await ws.send_json(self._error_reply(data, "REQUEST_FAILED"))
             return authorized
         return authorized
 

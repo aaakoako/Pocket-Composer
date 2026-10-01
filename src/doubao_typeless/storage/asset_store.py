@@ -4,9 +4,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 JPEG_MAGIC = b"\xff\xd8\xff"
 MAX_BYTES = 8 * 1024 * 1024
@@ -44,14 +46,23 @@ class AssetStore:
         os.replace(meta_tmp, meta_path)
         return meta
 
+    def _path(self, asset_id: str, suffix: str) -> Path:
+        # 素材号来自网络；只接受安全字符，读取路径不能离开素材目录。
+        if not isinstance(asset_id, str) or not _SAFE_ID.fullmatch(asset_id):
+            raise FileNotFoundError("invalid asset id")
+        return self.root / f"{asset_id}{suffix}"
+
     def get(self, asset_id: str) -> bytes:
-        path = self.root / f"{asset_id}.bin"
+        path = self._path(asset_id, ".bin")
         if not path.is_file():
             raise FileNotFoundError(asset_id)
         return path.read_bytes()
 
     def meta(self, asset_id: str) -> dict:
-        path = self.root / f"{asset_id}.meta.json"
+        try:
+            path = self._path(asset_id, ".meta.json")
+        except FileNotFoundError:
+            return {}
         if path.is_file():
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))

@@ -3,9 +3,9 @@ import { installInputMotion } from './input-motion';
 import { overlayHistory } from "./overlay-history";
 import { SharedEditor, type Tool } from "./editor/canvas";
 import { applyReady, applyRotated, buildDraftUpdate, buildPrimaryUpdate, rotatePrimary, DraftOutbox } from "./sync.js";
-import { looksLikeKeyScript, newId } from "./transport/protocol";
+import { newId } from "./transport/protocol";
 import { uploadPng, type UploadTicket } from "./transport/upload";
-import { DraftRepository, type SavedDraft } from "./storage/drafts";
+import { DraftRepository, sameContent, type SavedDraft } from "./storage/drafts";
 
 type Session = {
   session_id: string;
@@ -53,6 +53,14 @@ export function boot(root: HTMLElement): void {
         <div id="conflictBanner" class="conflict" hidden>
           <b>手机和电脑有不同的草稿</b><p>两份内容都还在，请选择这次继续使用哪一份。</p>
           <button id="useLocal">继续手机这份</button><button id="useServer">采用电脑这份</button>
+        </div>
+        <div id="readFailBanner" class="conflict" role="alert" hidden>
+          <b>手机草稿暂时读不出</b><p>旧稿没有被覆盖。可以重试读取，或先写一份新稿；旧稿读出后仍在，新稿可在「最近」找回。</p>
+          <button id="retryRead">重试读取</button><button id="sideDraft">先写新稿</button>
+        </div>
+        <div id="tabBanner" class="conflict" role="status" hidden>
+          <b>这份草稿正在另一个页面编辑</b><p>为避免互相覆盖，本页已暂停。点下面按钮改在本页继续，会读入最新内容。</p>
+          <button id="takeTab">在此页继续</button>
         </div>
         <textarea id="text" placeholder="点这里，用手机输入法说话…&#10;&#10;也可以圈出问题，或画个草图。" aria-label="本次图文说明"></textarea>
         <div class="writehint"><span>用手机输入法说话，文字自动同步</span><span id="charCount">0 字</span></div>
@@ -255,11 +263,18 @@ export function boot(root: HTMLElement): void {
 
   const DRAFT_KEY = "dt.v3.draft";
   let restored = false;
+  let readFailed = false;
+  let tabInactive = false;
   let persistTimer = 0;
   const repository = new DraftRepository(status => {
-    $("localSave").textContent = status === "saved" ? "草稿已保存在这台手机" :
-      status === "saving" ? "正在保存手机草稿…" : "手机存储不可用；请先发送或保留此页面，勿直接关闭";
-  });
+    $("localSave").textContent = status === "saved" ? (repository.writingSide ? "新稿另存在这台手机，旧稿未覆盖" : "草稿已保存在这台手机") :
+      status === "saving" ? "正在保存手机草稿…" : status === "superseded" ? "另一个页面正在编辑，本页已暂停写入" :
+      "手机存储不可用；请先发送或保留此页面，勿直接关闭";
+  }, () => becomeInactive());
+  const tabs = typeof BroadcastChannel === "function" ? new BroadcastChannel("dt.v3.tabs") : null;
+  if (tabs) tabs.onmessage = (ev) => {
+    if (ev.data?.type === "claimed" && ev.data.tab !== repository.tab && restored && !repository.writingSide) becomeInactive();
+  };
 
   function draftSnapshot(): SavedDraft {
     return {schema: 1, text: state.text, revision: state.revision,
@@ -268,39 +283,150 @@ export function boot(root: HTMLElement): void {
   }
 
   function persistDraft() {
-    if (!restored) return;
-    window.clearTimeout(persistTimer);
-    persistTimer = window.setTimeout(() => repository.save(draftSnapshot()), 120);
+    if (!restored || tabInactive) return;
+    window.clearTimeout(persistTimer); persistTimer = 0;
+    persistTimer = window.setTimeout(() => {persistTimer = 0; repository.save(draftSnapshot());}, 120);
+  }
+
+  function applySaved(saved: any) {
+    const ok = saved && typeof saved === "object";
+    state.text = ok ? String(saved.text || "") : "";
+    state.revision = ok ? Number(saved.revision || 0) : 0;
+    state.draft_id = ok ? String(saved.draft_id || "") : "";
+    state.epoch = ok ? String(saved.epoch || "") : "";
+    state.generation = ok ? Number(saved.generation || 0) : 0;
+    state.last_intent = ok && saved.last_intent && typeof saved.last_intent.id === "string" ? saved.last_intent : null;
+    state.assets = ok && Array.isArray(saved.assets) ? saved.assets.slice(0,6) : [];
+    state.removed = []; state.conflict = null;
+    let recoveredEditing = false;
+    for (const a of state.assets) {
+      if (!a.id || typeof a.preview !== "string") {a.id ||= newId(); a.preview = ""; a.status = "failed"; recoveredEditing = true;}
+      if (a.status === "editing") {a.status = "failed"; recoveredEditing = true;}
+    }
+    // A recovered editor is a new asset state; reusing its old revision causes a false conflict.
+    if (recoveredEditing) {state.revision++; state.last_intent = null;}
+    state.draft_id ||= newId();
+    state.epoch ||= newId();
+  }
+
+  /** 读失败与“没有旧稿”不同：读失败时绝不进入可写状态，避免空稿覆盖旧稿。 */
+  async function readCurrent(): Promise<{ok: boolean; saved: any}> {
+    const legacy = () => { try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } };
+    if (!DraftRepository.available()) return {ok: true, saved: legacy()};
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        // 只迁移旧记录；成功保存之前不删除旧备份。
+        return {ok: true, saved: (await repository.claim()) || legacy()};
+      } catch { await new Promise(resolve => window.setTimeout(resolve, 250 * (attempt + 1) ** 2)); }
+    }
+    return {ok: false, saved: null};
   }
 
   async function restoreDraft() {
-    let saved: any = null;
-    try { saved = await repository.load(); }
-    catch { $("localSave").textContent = "无法读取手机存储；已有内容不会被清除"; }
-    if (!saved) {
-      // 只迁移旧记录；成功保存之前不删除旧备份。
-      try { saved = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch {}
+    const result = await readCurrent();
+    if (!result.ok) {
+      readFailed = true; restored = false;
+      $("readFailBanner").hidden = false;
+      $("localSave").textContent = "手机草稿暂时读不出；旧稿未覆盖";
+      return;
     }
-    if (saved && typeof saved === "object") {
-      state.text = String(saved.text || "");
-      state.revision = Number(saved.revision || 0);
-      state.draft_id = String(saved.draft_id || "");
-      state.epoch = String(saved.epoch || "");
-      state.generation = Number(saved.generation || 0);
-      state.last_intent = saved.last_intent && typeof saved.last_intent.id === "string" ? saved.last_intent : null;
-      state.assets = Array.isArray(saved.assets) ? saved.assets.slice(0,6) : [];
-      let recoveredEditing = false;
-      for (const a of state.assets) {
-        if (!a.id || typeof a.preview !== "string") {a.id ||= newId(); a.preview = ""; a.status = "failed"; recoveredEditing = true;}
-        if (a.status === "editing") {a.status = "failed"; recoveredEditing = true;}
-      }
-      // A recovered editor is a new asset state; reusing its old revision causes a false conflict.
-      if (recoveredEditing) {state.revision++; state.last_intent = null;}
+    readFailed = false; $("readFailBanner").hidden = true;
+    let saved = result.saved;
+    let adoptedSide = "";
+    if (!saved || (!saved.text && !(saved.assets || []).length)) {
+      // 上次读不出时另写的新稿：主稿为空才自动接上，否则只在「最近」中列出。
+      try {
+        const side = (await repository.sideDrafts()).find(item => item.key.startsWith("side-new-"));
+        if (side) {saved = side.draft; adoptedSide = side.key;}
+      } catch { /* 列表读不出不影响主稿 */ }
     }
-    state.draft_id ||= newId();
-    state.epoch ||= newId();
+    applySaved(saved);
     restored = true;
+    tabs?.postMessage({type: "claimed", tab: repository.tab});
+    if (adoptedSide) {
+      repository.save(draftSnapshot());
+      void repository.flush().then(() => repository.remove(adoptedSide)).catch(() => {});
+    }
   }
+
+  /** 被接管时本页尚未写入的最后内容；接管回来时据此决定恢复到编辑区还是只留在「最近」。 */
+  let inactiveKept: SavedDraft | null = null;
+  let inactiveFlush: Promise<void> = Promise.resolve();
+  function becomeInactive() {
+    if (tabInactive || !restored) return;
+    tabInactive = true;
+    const pending = persistTimer !== 0;
+    window.clearTimeout(persistTimer); persistTimer = 0;
+    const editing = editorOpen();
+    if (editing) {
+      saveOpenEditor();
+      ++editorSequence; editorAbort?.abort(); editor?.destroy(); editor = null; editorLoading = false;
+      $("editor").classList.remove("show"); $("composer").style.display = "flex"; $("mobileHead").style.display = "flex";
+    }
+    if (pending || editing) {
+      // 主稿已归另一页面：受保护写入会被拒，不同的内容在同一事务里另存为 side-superseded，主稿不动。
+      inactiveKept = structuredClone(draftSnapshot());
+      repository.save(inactiveKept);
+    }
+    inactiveFlush = repository.flush().catch(() => {});
+    finishSend(activeSend);
+    outbox.disconnect();
+    for (const controller of uploadControllers.values()) controller.abort();
+    pendingCapture = ""; ($("captureBtn") as HTMLButtonElement).disabled = false;
+    sessionReady = false; state.online = false;
+    try { ws?.close(); } catch { /* 已断开 */ }
+    $("tabBanner").hidden = false;
+    update();
+  }
+
+  let activating = false;
+  async function activateTab() {
+    if (!tabInactive || activating) return;
+    activating = true;
+    try {
+      // 先等被拒的写入落定再登记：否则那次写入会在接管后被接受，用本页旧内存覆盖别页的新主稿。
+      await inactiveFlush;
+      const baseline = repository.lastWritten;
+      const saved = await repository.claim();
+      const kept = inactiveKept;
+      const untouched = baseline ? sameContent(baseline, saved) : !saved;
+      if (kept && untouched) {
+        // 别的页面没有改过主稿：本页最后的内容就是最新的，接回编辑区并写回主稿。
+        applySaved(saved ? {...saved, text: kept.text, assets: kept.assets, last_intent: kept.last_intent ?? saved.last_intent,
+          revision: Math.max(kept.revision, saved.revision) + 1, saved_at: Date.now()} : kept);
+        repository.save(draftSnapshot());
+        void repository.flush().then(() => repository.discardSide(repository.supersededKey, kept)).catch(() => {});
+      } else {
+        // 读入其它页面写下的最新稿；本页被拒的不同内容已另存，可在「最近」恢复。
+        applySaved(saved);
+        if (kept && !sameContent(kept, saved)) toast("本页被接管前的最后改动已放进「最近」，可在那里恢复");
+      }
+      inactiveKept = null;
+      tabInactive = false; $("tabBanner").hidden = true;
+      latestMessage = null; attachmentsSignature = "";
+      tabs?.postMessage({type: "claimed", tab: repository.tab});
+      update();
+      void recoverConnection();
+    } catch { toast("暂时读不出手机草稿，本页保持暂停；可再试"); }
+    finally { activating = false; }
+  }
+  $("takeTab").onclick = () => { void activateTab(); };
+  $("retryRead").onclick = () => {
+    ($("retryRead") as HTMLButtonElement).disabled = true;
+    void restoreDraft().then(() => {
+      if (restored) {($("text") as HTMLTextAreaElement).disabled = false; update(); void recoverConnection(true);}
+    }).finally(() => {($("retryRead") as HTMLButtonElement).disabled = false;});
+  };
+  $("sideDraft").onclick = () => {
+    repository.useSideKey();
+    applySaved(null);
+    readFailed = false; restored = true;
+    $("readFailBanner").hidden = true;
+    ($("text") as HTMLTextAreaElement).disabled = false;
+    update(); persistDraft();
+    toast("新稿另存在这台手机；旧稿保留，下次读出后可在「最近」找回");
+    void recoverConnection(true);
+  };
 
   function sendLabel(): string {
     if (!state.online || !state.session) return "未连接";
@@ -316,16 +442,21 @@ export function boot(root: HTMLElement): void {
     renderSyncState();
     const input = $("text") as HTMLTextAreaElement;
     if (input.value !== state.text) input.value = state.text;
+    const writable = restored && !tabInactive;
+    input.disabled = !writable;
+    ($("photoBtn") as HTMLButtonElement).disabled = !writable;
+    ($("boardBtn") as HTMLButtonElement).disabled = !writable;
+    ($("captureBtn") as HTMLButtonElement).disabled = !writable || !!pendingCapture;
     $("charCount").textContent = `${[...state.text].length} 字`;
     $("captionHint").textContent = state.assets.map((a, i) => `${i + 1}·${a.kind}`).join(" ");
     $("connText").textContent = state.online ? "已连接电脑" : resumePending ? "自动续接中 · 可继续写" : "离线也可继续写";
     $("connDot").style.background = state.online ? "#5B5CE2" : "#858DA0";
     $("connectBtn").hidden = state.online;
     const btn = $("sendBtn") as HTMLButtonElement;
-    ($("clearDraft") as HTMLButtonElement).disabled = !restored || clearingDraft || finishingEditor ||
+    ($("clearDraft") as HTMLButtonElement).disabled = !writable || clearingDraft || finishingEditor ||
       (!state.text && !state.assets.length && !state.sending && !state.conflict && !pendingCapture);
     btn.textContent = sendLabel();
-    btn.disabled = !state.online || !state.session || state.uploading || state.sending || !!state.conflict ||
+    btn.disabled = !writable || !state.online || !state.session || state.uploading || state.sending || !!state.conflict ||
       state.assets.some(a => !a.asset_id || (a.status && a.status !== "ready")) || (!state.text.trim() && !state.assets.length);
     $("conflictBanner").hidden = !state.conflict;
     state.removed = state.removed.filter(item => item.epoch === state.epoch);
@@ -440,14 +571,23 @@ export function boot(root: HTMLElement): void {
       for (const controller of uploadControllers.values()) controller.abort();
       ws = null;
       update();
-      if (!closingForAuth && state.session) reconnectTimer = window.setTimeout(connect, 1500);
+      if (!closingForAuth && !tabInactive && state.session) reconnectTimer = window.setTimeout(connect, 1500);
     };
     ws.onmessage = (ev) => {
       if (ws !== socket) return;
       lastPong = Date.now();
       let msg: any;
       try {msg = JSON.parse(ev.data);} catch {return;}
-      if (looksLikeKeyScript(msg)) return;
+      // 电脑回执里的正文/图注可以包含任何技术词，不对服务器消息做内容过滤。
+      if (tabInactive) return;
+      if (msg.type === "pong") pongWaiters.splice(0).forEach(done => done());
+      if (msg.type === "mirror.snapshot") mirrorWaiters.splice(0).forEach(done => done(msg));
+      if (msg.type === "asset.claimed") {
+        toast(`电脑已允许取回 ${(msg.asset_ids || []).length} 张旧图，正在同步`);
+        latestMessage = null; attachmentsSignature = ""; sendDraft(); update();
+      }
+      if (msg.type === "asset.claim_pending") toast("请在电脑连接页允许取回旧图；文字已保留");
+      if (msg.type === "asset.claim_denied") toast("电脑未允许取回旧图。可删掉这些图后继续，文字不受影响");
       if (msg.type === "session.ready") {
         state.online = true;
         sessionReady = true;
@@ -480,7 +620,8 @@ export function boot(root: HTMLElement): void {
       if (msg.type === "attempt.status") {
         if (activeSend && !finishFeedback(msg)) return;
         const labels: Record<string, string> = {CONFIRMED:"已放入输入框",UNKNOWN:"已尝试插入，可召回重试",NO_STEPS:"未插入，请先选中电脑输入框",PARTIAL:"只完成一部分，请查看恢复选项",BUSY:"正在处理上一份内容"};
-        const detail = msg.progress?.message || labels[msg.result] || "插入未完成，内容保留";
+        const base = msg.progress?.message || labels[msg.result] || "插入未完成，内容保留";
+        const detail = msg.receipt_saved === false ? `${base}（电脑未能保存这次回执，请先在电脑上确认，勿重复插入）` : base;
         $("deliveryStatus").textContent=`上次插入：${detail}`;$("deliveryStatus").hidden=false;
         toast(`上次插入：${detail}`);
         update();
@@ -501,15 +642,24 @@ export function boot(root: HTMLElement): void {
         update();
         outbox.reject(msg);
         const err = String(msg.error || "");
+        if (err === "ASSET_OWNER") {
+          void recoverForeignAssets((msg.asset_ids || []).map(String));
+          return;
+        }
         if (["OTHER_PHONE_OWNER","PHONE_IDENTITY_CONFLICT","PHONE_REVISION_CONFLICT","STALE_PHONE_REVISION","STALE_PHONE_GENERATION"].includes(err)) {
           state.conflict = msg.mirror;
-          $("conflictBanner").querySelector("b")!.textContent = err === "OTHER_PHONE_OWNER" ? "另一台手机正在编辑" : "发现另一份编辑记录";
-          $("conflictBanner").querySelector("p")!.textContent = "要改由这台手机继续吗？另一份稿会保存在电脑恢复记录中。";
-          $("useServer").hidden = true;
+          const previousLink = err === "OTHER_PHONE_OWNER" && msg.mirror?.owner_online === false;
+          $("conflictBanner").querySelector("b")!.textContent = err !== "OTHER_PHONE_OWNER" ? "发现另一份编辑记录" :
+            previousLink ? "电脑上的稿来自之前的连接" : "另一台手机正在编辑";
+          $("conflictBanner").querySelector("p")!.textContent = previousLink ?
+            "可能就是这台手机重新扫码后的旧连接。选「继续手机这份」或「采用电脑这份」；另一份都会保留在恢复记录中。" :
+            "选「继续手机这份」或「采用电脑这份」；另一份都会先保留在恢复记录中。";
+          $("useServer").hidden = false;
           update(); return;
         }
         if (/session revoked|session expired|bad token/i.test(err)) {
           sessionStorage.removeItem("dt.v3.session");
+          forgetProof(state.session);
           state.session = null;
           closingForAuth = true;
           state.online = false; sessionReady = false; outbox.disconnect();
@@ -520,7 +670,7 @@ export function boot(root: HTMLElement): void {
           void recoverConnection(true);
           return;
         }
-        if (relevant) toast(err.includes("not granted") || err === "CAPTURE_DENIED" ? "这台手机还没有截图权限，文字仍可同步" : err);
+        if (relevant) toast(errorText(err, msg));
         return;
       }
       if (msg.type === "capture.result") {
@@ -567,6 +717,108 @@ export function boot(root: HTMLElement): void {
       render_revision: a.render_revision || 1, caption: a.caption || ""}));
   }
 
+  const ERROR_TEXT: Record<string, string> = {
+    CAPTURE_DENIED: "这台手机还没有截图权限，文字仍可同步",
+    UNSUPPORTED_MESSAGE: "电脑与手机页面版本不一致，请刷新本页；草稿保留",
+    UNEXPECTED_FIELD: "电脑与手机页面版本不一致，请刷新本页；草稿保留",
+    INVALID_MESSAGE: "这次内容格式电脑未能识别，草稿保留",
+    "forbidden payload": "这类按键指令不允许从手机发送，草稿保留",
+    "rate limited": "操作太快，电脑暂缓处理；草稿保留，稍后自动补发",
+    paused: "电脑已暂停连接，草稿保留在手机",
+    pc_editing: "电脑正在改字，请稍后再试",
+    "stale draft": "电脑上的稿已更新，请先同步后再操作",
+    "stale epoch": "电脑上的稿已更新，请先同步后再操作",
+    "text byte limit": "文字太长，电脑无法接收这份稿",
+    IMAGE_NOT_UPLOADED: "还有图片没传完，不会先发残缺文字",
+    EMPTY_DRAFT: "这份稿是空的，没有可插入的内容",
+    "insert not granted": "请先在电脑连接页允许这台手机插入",
+    "action not granted": "请先在电脑连接页允许这台手机插入",
+    "nonce invalid": "这次确认已过期，请再点一次；不会重复插入",
+    REQUEST_FAILED: "电脑处理失败，草稿保留；可稍后再试",
+  };
+  function errorText(err: string, msg: any): string {
+    if (err.includes("not granted") && msg?.request_type === "capture.request") return ERROR_TEXT.CAPTURE_DENIED;
+    return ERROR_TEXT[err] || String(msg?.message || "") || "电脑未接受这次操作，草稿保留";
+  }
+
+  function dataUrlToBlob(url: string): Blob | null {
+    const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url);
+    if (!match) return null;
+    try {
+      const raw = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return new Blob([bytes], {type: match[1] || "image/png"});
+    } catch { return null; }
+  }
+
+  /** 旧连接上传的图不再属于本次连接：有本地原图就重新上传；没有才请电脑明确批准取回。 */
+  let recoveringAssets = false;
+  async function recoverForeignAssets(ids: string[]) {
+    if (recoveringAssets || !ids.length || tabInactive) return;
+    recoveringAssets = true;
+    try {
+      const claim: string[] = [];
+      let reuploads = 0;
+      for (const a of state.assets) {
+        if (!a.asset_id || !ids.includes(a.asset_id)) continue;
+        const blob = a.pending_png || (a.preview?.startsWith("data:") ? dataUrlToBlob(a.preview) : null);
+        if (blob) {
+          a.pending_png = blob; a.asset_id = undefined; a.upload_ticket = undefined;
+          a.status = "queued"; a.progress = 0; reuploads++;
+        } else claim.push(a.asset_id);
+      }
+      if (claim.length && ws?.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({protocol: 3, type: "asset.claim", asset_ids: claim, request_id: newId()}));
+      if (reuploads) toast(`正在用手机里的原图重新上传 ${reuploads} 张图`);
+      latestMessage = null; attachmentsSignature = "";
+      sendDraft(); update(); void uploadPending();
+    } finally { recoveringAssets = false; }
+  }
+
+  const pongWaiters: Array<() => void> = [];
+  /** 回到前台时确认连接真的活着；半死连接立即重连，不等 18 秒心跳。 */
+  function probeConnection() {
+    const socket = ws;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {void recoverConnection(); return;}
+    let answered = false;
+    pongWaiters.push(() => {answered = true;});
+    try { socket.send(JSON.stringify({type: "ping"})); } catch { /* 下面会关闭重连 */ }
+    window.setTimeout(() => {
+      if (!answered && ws === socket) { try { socket.close(); } catch { /* 已关闭 */ } }
+    }, 3000);
+  }
+
+  const mirrorWaiters: Array<(msg: any) => void> = [];
+  function requestMirror(): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {reject(new Error("OFFLINE")); return;}
+      const timer = window.setTimeout(() => reject(new Error("TIMEOUT")), 5000);
+      mirrorWaiters.push(msg => {window.clearTimeout(timer); resolve(msg);});
+      ws.send(JSON.stringify({protocol: 3, type: "mirror.request", request_id: newId()}));
+    });
+  }
+
+  const PROOF_KEY = "dt.v3.proof";
+  /** 同一浏览器其它标签页重新扫码时出示仍有效的会话，沿用设备身份；设备号本身不算证明。 */
+  function rememberProof(session: Session | null) {
+    if (!session?.session_id || !session.token) return;
+    try { localStorage.setItem(PROOF_KEY, JSON.stringify({session_id: session.session_id, token: session.token})); } catch { /* 仅影响新标签页续用身份 */ }
+  }
+  /** 只撤掉这次失效会话自己的证明；别的标签页已换上的新证明保留。 */
+  function forgetProof(session: Session | null) {
+    try {
+      const value = JSON.parse(localStorage.getItem(PROOF_KEY) || "null");
+      if (!value || (session && value.session_id === session.session_id)) localStorage.removeItem(PROOF_KEY);
+    } catch { try { localStorage.removeItem(PROOF_KEY); } catch { /* 无存储 */ } }
+  }
+  function storedProof(): {session_id: string; token: string} | null {
+    try {
+      const value = JSON.parse(localStorage.getItem(PROOF_KEY) || "null");
+      return value && typeof value.session_id === "string" && typeof value.token === "string" ? value : null;
+    } catch { return null; }
+  }
+
   let latestMessage: any = null;
   let syncState = "offline";
   let lastPong = Date.now();
@@ -578,7 +830,7 @@ export function boot(root: HTMLElement): void {
       ws.send(JSON.stringify(message));
     },
     persist: async () => {
-      window.clearTimeout(persistTimer);
+      window.clearTimeout(persistTimer); persistTimer = 0;
       repository.save(draftSnapshot()); await repository.flush();
     },
     onState: (status: string) => {
@@ -610,11 +862,11 @@ export function boot(root: HTMLElement): void {
     return latestMessage;
   }
   function publishCurrent() {
-    if (clearingDraft) return;
+    if (clearingDraft || tabInactive || !restored) return;
     outbox.offer(currentMessage());
   }
   function sendDraft() {
-    if (clearingDraft) return;
+    if (clearingDraft || tabInactive) return;
     // New authoring cancels an old send affordance; rotation fetches a fresh status afterwards.
     submitAvailable = false; $("submitPanel").hidden = true;
     // Feedback from an earlier insertion must never describe the newly edited draft.
@@ -660,7 +912,7 @@ export function boot(root: HTMLElement): void {
       const after: SavedDraft = {...before, text:"", assets:[], epoch:newId(),
         generation:(before.generation || 0)+1, revision:0, last_intent:null, saved_at:Date.now()};
       try {
-        window.clearTimeout(persistTimer);
+        window.clearTimeout(persistTimer); persistTimer = 0;
         await repository.replaceWithBackup(before, after);
       } catch {
         toast("清空未完成，原稿仍保留；请重试");return;
@@ -695,6 +947,11 @@ export function boot(root: HTMLElement): void {
   }
   async function prepareForDesktop(requestId: string) {
     const message = currentMessage();
+    if (tabInactive || !restored) {
+      // 暂停的页面只回“不是当前页”，由电脑等待同一手机的当前页面。
+      if (ws?.readyState === 1) ws.send(JSON.stringify({...message,type:"draft.prepared",request_id:requestId,error:"PHONE_NOT_CURRENT"}));
+      return;
+    }
     publishCurrent();
     try {
       await outbox.flush(message.update_id, 4500);
@@ -716,10 +973,19 @@ export function boot(root: HTMLElement): void {
     finishSend(activeSend); ws?.close(); update();
   });
   window.addEventListener("online", () => {void recoverConnection();});
+  function onForeground() {
+    if (!restored || repository.writingSide) {if (restored) probeConnection(); return;}
+    // 回到前台的页面接续编辑：读入最新主稿并成为写入者；别的页面随之暂停。
+    if (tabInactive) {void activateTab(); return;}
+    void repository.isWriter().then(writer => {
+      if (writer) {probeConnection(); if (sessionReady) publishCurrent(); return;}
+      becomeInactive(); void activateTab();
+    }).catch(() => probeConnection());
+  }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {void recoverConnection(); if(sessionReady) publishCurrent();}
+    if (document.visibilityState === "visible") onForeground();
   });
-  window.addEventListener("pageshow", () => {if(restored) void recoverConnection();});
+  window.addEventListener("pageshow", () => {if (restored) onForeground();});
 
   let termTimer = 0;
   $("text").addEventListener("input", (e) => {
@@ -986,7 +1252,7 @@ export function boot(root: HTMLElement): void {
     if (!editor || finishingEditor || editorLoading) return;
     if (state.editorKind === "快速白板" && editor.ops === 0) {toast("先画一点内容，再加入本次图文");return;}
     finishingEditor = true;
-    window.clearTimeout(persistTimer);
+    window.clearTimeout(persistTimer); persistTimer = 0;
     ($("done") as HTMLButtonElement).disabled = true;
     ($("back") as HTMLButtonElement).disabled = true;
     const item = state.assets.find(a=>a.id===currentId);
@@ -1043,7 +1309,7 @@ export function boot(root: HTMLElement): void {
   }
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden" && restored && !clearingDraft) {
-      window.clearTimeout(persistTimer);
+      window.clearTimeout(persistTimer); persistTimer = 0;
       saveOpenEditor(); repository.save(draftSnapshot());
     }
   });
@@ -1293,10 +1559,19 @@ export function boot(root: HTMLElement): void {
     return resumeFlight;
   }
 
+  function sharedValue(key: string): string | null {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+  /** 只删除本页实际用过的那份；别的标签页已写入的新值保持不动。 */
+  function removeSharedIf(key: string, attempted: string | null) {
+    try { if (attempted !== null && localStorage.getItem(key) === attempted) localStorage.removeItem(key); } catch { /* 无存储 */ }
+  }
+
   async function attemptRemembered(): Promise<boolean> {
+    const attempted = sharedValue(DEVICE_KEY);
     let stored: { device_id?: string; device_secret?: string } | null = null;
     try {
-      stored = JSON.parse(localStorage.getItem(DEVICE_KEY) || "null");
+      stored = JSON.parse(attempted || "null");
     } catch {
       stored = null;
     }
@@ -1304,6 +1579,14 @@ export function boot(root: HTMLElement): void {
     resumePending = true;
     update();
     window.clearTimeout(reconnectTimer);
+    // 请求期间别的标签页可能已换上新凭据：这次的回复（成功或失败）属于旧凭据，丢弃后按常规节奏用新凭据续接。
+    const superseded = () => sharedValue(DEVICE_KEY) !== attempted || !!state.session;
+    const retryLater = () => {
+      resumePending = !state.session;
+      if (!state.session) reconnectTimer = window.setTimeout(() => {void recoverConnection(true);}, 3000);
+      update();
+      return true;
+    };
     try {
       const res = await fetch("/v3/pair", {
         method: "POST",
@@ -1314,7 +1597,8 @@ export function boot(root: HTMLElement): void {
       if (!res.ok) {
         const body = await res.json();
         if (res.status === 400 && ["device expired", "device mismatch"].includes(body.error)) {
-          localStorage.removeItem(DEVICE_KEY);
+          if (superseded()) return retryLater();
+          removeSharedIf(DEVICE_KEY, attempted);
           resumePending = false;
           update();
           toast("此配对已过期或被撤销，请重新扫码；草稿仍在");
@@ -1322,9 +1606,12 @@ export function boot(root: HTMLElement): void {
         }
         throw new Error("resume unavailable");
       }
-      state.session = await res.json();
+      const session = await res.json();
+      if (superseded()) return retryLater();
+      state.session = session;
       resumePending = false;
       try {sessionStorage.setItem("dt.v3.session", JSON.stringify(state.session));} catch { /* local credential still persists */ }
+      rememberProof(state.session);
       const clean = new URL(location.href); clean.searchParams.delete("pair");
       history.replaceState(history.state, "", clean.pathname + clean.search + clean.hash);
       if (document.getElementById("pairStatus")) closeSheet();
@@ -1338,23 +1625,29 @@ export function boot(root: HTMLElement): void {
     }
   }
 
-  async function submitPair(code: string, panelVersion: number): Promise<boolean> {
-    if (await resumeRemembered()) return true;
+  async function submitPair(code: string, panelVersion: number): Promise<{ok: boolean; error?: string; retry?: number}> {
+    if (await resumeRemembered()) return {ok: true};
+    const previous = storedProof();
     const res = await fetch("/v3/pair", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(previous ? { code, previous } : { code }),
       signal: AbortSignal.timeout(6000),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      let body: any = {};
+      try { body = await res.json(); } catch { /* 无正文 */ }
+      return {ok: false, error: String(body.error_code || ""), retry: Number(body.retry_after) || 0};
+    }
     state.session = await res.json();
     sessionStorage.setItem("dt.v3.session", JSON.stringify(state.session));
+    rememberProof(state.session);
     const clean = new URL(location.href); clean.searchParams.delete("pair");
     history.replaceState(history.state, "", clean.pathname + clean.search + clean.hash);
     if (sheetRevision === panelVersion) closeSheet();
     connect();
     update();
-    return true;
+    return {ok: true};
   }
 
   function showPair() {
@@ -1369,8 +1662,10 @@ export function boot(root: HTMLElement): void {
       try {
         const paired = await submitPair(code, version);
         if (sheetRevision !== version) return;
-        if (!paired) $("pairStatus").textContent = scanned ?
-          "这个二维码已过期或已使用。电脑连接页会自动刷新，请重新扫描当前二维码；手机草稿仍在。" :
+        if (!paired.ok) $("pairStatus").textContent =
+          paired.error === "PAIRING_LOCKED" ? `输错次数较多，请 ${paired.retry || 30} 秒后再试；手机草稿仍在。` :
+          paired.error === "SHORT_CODE_DISABLED" ? "备用短码因多次输错已停用。请扫码，或在电脑点「重新配对」后再用新短码。" :
+          scanned ? "这个二维码已过期或已使用。打开电脑连接页会显示新二维码，请重新扫描；手机草稿仍在。" :
           "短码无效或已过期，请核对电脑当前显示的短码。";
       } catch { if (sheetRevision === version) $("pairStatus").textContent = "暂时连不上电脑。请确认同一网络；可以继续离线写草稿。"; }
       finally {button.disabled = false;}
@@ -1416,6 +1711,14 @@ export function boot(root: HTMLElement): void {
         const restore=document.createElement("button");restore.textContent="恢复手机上次图文（可离线）";
         restore.onclick=()=>showRestoreProposal({text:local.text,local_snapshot:local});card.append(preview,restore);
       }
+      // 读不出主稿时另写的新稿、被其它页面接管时未写入的内容，都可在这里恢复。
+      for(const side of (await repository.sideDrafts()).slice(0,5)){
+        if(sheetRevision!==version)return;
+        const label=side.key.startsWith("side-new-")?"读不出旧稿时另写":"另一页面暂停时留下";
+        const preview=document.createElement("p");preview.textContent=`${label} · ${side.draft.assets.length} 图 · ${side.draft.text.slice(0,90)}`;
+        const restore=document.createElement("button");restore.textContent="恢复这一份（当前稿先保留）";
+        restore.onclick=()=>showRestoreProposal({text:side.draft.text,local_snapshot:side.draft});card.append(preview,restore);
+      }
     }catch{toast("无法读取手机恢复记录，当前稿不受影响");}
     if(sheetRevision!==version)return;
     if (!state.session || !state.online) {
@@ -1457,19 +1760,66 @@ export function boot(root: HTMLElement): void {
     });
   };
 
+  /** 手机主稿冲突时明确「采用电脑这份」：先保全手机稿，再按电脑镜像全文接续。 */
+  let adopting = false;
+  async function adoptDesktopCopy() {
+    if (adopting) return;
+    adopting = true;
+    try {
+      let snapshot: any;
+      try { snapshot = await requestMirror(); } catch { toast("暂时读不到电脑这份，手机稿保留；可稍后再试"); return; }
+      // 等待期间同一冲突可能被重复报告（对象会换），只要冲突仍未解决就继续。
+      if (!state.conflict) return;
+      try {repository.save(draftSnapshot());await repository.backup(draftSnapshot());}
+      catch {toast("当前稿尚未保全，暂不切换");return;}
+      if (!state.conflict) return;
+      for (const controller of uploadControllers.values()) controller.abort();
+      // 另一台在线手机的图不带过来；原手机已离线的图走电脑批准认领。
+      const all = (snapshot.assets || []).filter((a: any) => a.asset_id);
+      const usable = all.filter((a: any) => a.accessible !== false || snapshot.owner_online === false);
+      const skipped = all.length - usable.length;
+      state.text = String(snapshot.text || "");
+      state.assets = usable.slice(0, 6).map((a: any) => ({
+        id: String(a.id || a.asset_id), asset_id: String(a.asset_id), kind: "图片", preview: `/v3/assets/${a.asset_id}`,
+        status: "ready" as AssetStatus, render_revision: Number(a.render_revision) || 1, caption: String(a.caption || ""),
+        w: Number(a.width) || undefined, h: Number(a.height) || undefined}));
+      state.removed = []; state.last_intent = null; state.conflict = null;
+      const sameDevice = snapshot.authority === "phone" && snapshot.owner_device_id === state.session?.device_id;
+      if (sameDevice) {
+        // 同一手机：沿用电脑这份的身份，作为它的下一个版本继续。
+        state.draft_id = String(snapshot.draft_id); state.epoch = String(snapshot.epoch);
+        state.generation = Number(snapshot.generation) || 0; state.revision = Number(snapshot.revision) || 0;
+        latestMessage = buildPrimaryUpdate(state, newId());
+      } else {
+        state.epoch = newId(); state.generation = Math.max(state.generation, Number(snapshot.generation) || 0) + 1; state.revision = 0;
+        latestMessage = buildPrimaryUpdate(state, newId());
+        if (snapshot.authority === "phone") latestMessage.takeover = {draft_id: snapshot.draft_id, epoch: snapshot.epoch,
+          revision: snapshot.revision, owner_device_id: snapshot.owner_device_id};
+      }
+      attachmentsSignature = "";
+      // 先放入新快照再连接：否则 connect() 会先发出冲突前排队的旧快照，其拒绝会挡住接管。
+      outbox.disconnect(); publishCurrent(); if (sessionReady) outbox.connect();
+      update();
+      toast(skipped ? `已采用电脑这份文字；${skipped} 张图属于另一台手机，未带过来` : "已采用电脑这份；手机原稿可在「最近」找回");
+    } finally { adopting = false; }
+  }
+
   async function resolveConflict(useLocal: boolean) {
     const remote = state.conflict;
     if (!remote) return;
+    if (!useLocal && (remote.authority === "phone" || typeof remote.text !== "string")) {
+      await adoptDesktopCopy();
+      return;
+    }
     if (remote.authority === "phone") {
-      if (!useLocal) return;
       try {repository.save(draftSnapshot());await repository.backup(draftSnapshot());}
       catch {toast("当前稿尚未保全，暂不切换");return;}
       // 只有用户明确采用手机这份时才建立新一代稿，旧稿先由服务端保全。
       state.epoch=newId();state.generation=Math.max(state.generation,Number(remote.generation)||0)+1;state.revision=0;
       latestMessage = buildPrimaryUpdate(state,newId());
       latestMessage.takeover = {draft_id:remote.draft_id,epoch:remote.epoch,revision:remote.revision,owner_device_id:remote.owner_device_id};
-      state.conflict=null;outbox.disconnect();if(sessionReady)outbox.connect();
-      publishCurrent();update();return;
+      state.conflict=null;outbox.disconnect();publishCurrent();if(sessionReady)outbox.connect();
+      update();return;
     }
     // 明确操作前保全本机稿；不把跨epoch旧稿自动伪装成服务器新稿。
     try { repository.save(draftSnapshot()); await repository.backup(draftSnapshot()); } catch {
@@ -1508,14 +1858,15 @@ export function boot(root: HTMLElement): void {
     state.session = null;
   }
   ($("text") as HTMLTextAreaElement).disabled = true;
-  void restoreDraft().then(async () => {
+  void restoreDraft().catch(() => {
+    readFailed = true; restored = false; $("readFailBanner").hidden = false;
+  }).then(async () => {
+    if (!restored) {update(); return;}
     ($("text") as HTMLTextAreaElement).disabled = false;
     update(); persistDraft();
-    await recoverConnection(true);
-  }).catch(() => {
-    restored = true;
-    ($("text") as HTMLTextAreaElement).disabled = false;
-    update();toast("电脑未连接，草稿仍在；可先继续写");
-    if (!state.text && !state.assets.length) showPair();
+    try { await recoverConnection(true); } catch {
+      update();toast("电脑未连接，草稿仍在；可先继续写");
+      if (!state.text && !state.assets.length) showPair();
+    }
   });
 }
