@@ -176,6 +176,9 @@ export function boot(root: HTMLElement): void {
   let currentId = "";
   const blobUrls: string[] = [];
   let reconnectTimer = 0;
+  let resumeFlight: Promise<boolean> | null = null;
+  let resumePending = false;
+  let secretRetryTimer = 0;
   let closingForAuth = false;
   let sheetRevision = 0;
   let sessionReady = false;
@@ -315,7 +318,7 @@ export function boot(root: HTMLElement): void {
     if (input.value !== state.text) input.value = state.text;
     $("charCount").textContent = `${[...state.text].length} 字`;
     $("captionHint").textContent = state.assets.map((a, i) => `${i + 1}·${a.kind}`).join(" ");
-    $("connText").textContent = state.online ? "已连接电脑" : "离线也可继续写";
+    $("connText").textContent = state.online ? "已连接电脑" : resumePending ? "自动续接中 · 可继续写" : "离线也可继续写";
     $("connDot").style.background = state.online ? "#5B5CE2" : "#858DA0";
     $("connectBtn").hidden = state.online;
     const btn = $("sendBtn") as HTMLButtonElement;
@@ -461,8 +464,8 @@ export function boot(root: HTMLElement): void {
         void prepareForDesktop(String(msg.request_id || ""));
       }
       if (msg.type === "device.remembered") {
-        if (msg.device_id && msg.device_secret) storeDevice(String(msg.device_id), String(msg.device_secret));
-        toast("已保存这台设备，下次可直接续接");
+        // 使用可重取的认证接口；只有写入手机存储后才确认已记住。
+        void pullRememberedSecret();
       }
       if (msg.type === "draft.ack") {
         if (msg.error) outbox.reject(msg);
@@ -505,16 +508,16 @@ export function boot(root: HTMLElement): void {
           $("useServer").hidden = true;
           update(); return;
         }
-        if (/session revoked|session expired/i.test(err)) {
+        if (/session revoked|session expired|bad token/i.test(err)) {
           sessionStorage.removeItem("dt.v3.session");
           state.session = null;
           closingForAuth = true;
+          state.online = false; sessionReady = false; outbox.disconnect();
           finishSend(activeSend);
           ws?.close();
           ws = null;
-          void resumeRemembered().then((ok) => {
-            if (!ok) showPair();
-          }).catch(() => {toast("电脑未连接，草稿仍在"); showPair();});
+          update();
+          void recoverConnection(true);
           return;
         }
         if (relevant) toast(err.includes("not granted") || err === "CAPTURE_DENIED" ? "这台手机还没有截图权限，文字仍可同步" : err);
@@ -712,10 +715,11 @@ export function boot(root: HTMLElement): void {
     state.online = false; sessionReady = false; outbox.disconnect();
     finishSend(activeSend); ws?.close(); update();
   });
-  window.addEventListener("online", () => {connect(); void uploadPending();});
+  window.addEventListener("online", () => {void recoverConnection();});
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {connect(); if(sessionReady) publishCurrent();}
+    if (document.visibilityState === "visible") {void recoverConnection(); if(sessionReady) publishCurrent();}
   });
+  window.addEventListener("pageshow", () => {if(restored) void recoverConnection();});
 
   let termTimer = 0;
   $("text").addEventListener("input", (e) => {
@@ -1092,7 +1096,7 @@ export function boot(root: HTMLElement): void {
   const stageResize = new ResizeObserver(()=>{if(editor&&!editorLoading) editor.resize();});
   stageResize.observe($("stage"));
 
-  $("connectBtn").onclick = () => {if (state.session) {connect();return;} void resumeRemembered().then(ok=>{if(!ok)showPair();}).catch(()=>showPair());};
+  $("connectBtn").onclick = () => {void recoverConnection(true);};
   $("sendBtn").onclick = () => { void sendBundle(); };
   async function sendBundle() {
     if (activeSend || state.sending) return;
@@ -1243,50 +1247,99 @@ export function boot(root: HTMLElement): void {
 
   function storeDevice(deviceId: string, secret: string) {
     try {
-      localStorage.setItem(DEVICE_KEY, JSON.stringify({ device_id: deviceId, device_secret: secret }));
+      const value = JSON.stringify({ device_id: deviceId, device_secret: secret });
+      localStorage.setItem(DEVICE_KEY, value);
+      return localStorage.getItem(DEVICE_KEY) === value;
     } catch {
-      /* private mode */
+      return false;
     }
   }
 
   async function pullRememberedSecret() {
-    if (!state.session) return;
+    const session = state.session;
+    if (!session || !sessionReady) return;
+    window.clearTimeout(secretRetryTimer);
+    const authHeaders = {"X-DT-Session": session.session_id, "X-DT-Token": session.token};
     try {
-      const res = await fetch("/v3/device/secret", { headers: headers() });
-      if (!res.ok) return;
+      const res = await fetch("/v3/device/secret", { headers: authHeaders, signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error("secret unavailable");
       const body = await res.json();
-      if (body.device_id && body.device_secret) storeDevice(String(body.device_id), String(body.device_secret));
+      if (state.session !== session || !body.device_secret || body.device_id !== session.device_id) return;
+      if (!storeDevice(String(body.device_id), String(body.device_secret))) {
+        toast("浏览器未能保存配对，请使用允许存储的普通浏览器；当前仍可使用");
+        return;
+      }
+      const ack = await fetch("/v3/device/secret/ack", {
+        method: "POST", headers: {...authHeaders, "Content-Type": "application/json"},
+        body: JSON.stringify({device_secret: body.device_secret}), signal: AbortSignal.timeout(6000),
+      });
+      if (!ack.ok) throw new Error("secret acknowledgement unavailable");
+      if (state.session === session) toast("已记住，下次自动续接");
     } catch {
-      /* ignore */
+      if (state.session === session && sessionReady)
+        secretRetryTimer = window.setTimeout(() => {void pullRememberedSecret();}, 3000);
     }
   }
 
-  async function resumeRemembered(): Promise<boolean> {
-    sessionStorage.removeItem("dt.v3.session");
-    state.session = null;
+  async function recoverConnection(showMissing = false) {
+    if (state.session) {connect(); return;}
+    if (!await resumeRemembered() && showMissing) showPair();
+  }
+
+  function resumeRemembered(): Promise<boolean> {
+    if (state.session) return Promise.resolve(true);
+    if (resumeFlight) return resumeFlight;
+    resumeFlight = attemptRemembered().finally(() => {resumeFlight = null;});
+    return resumeFlight;
+  }
+
+  async function attemptRemembered(): Promise<boolean> {
     let stored: { device_id?: string; device_secret?: string } | null = null;
     try {
       stored = JSON.parse(localStorage.getItem(DEVICE_KEY) || "null");
     } catch {
       stored = null;
     }
-    if (!stored?.device_id || !stored.device_secret) return false;
-    const res = await fetch("/v3/pair", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_id: stored.device_id, device_secret: stored.device_secret }),
-      signal:AbortSignal.timeout(6000),
-    });
-    if (!res.ok) return false;
-    state.session = await res.json();
-    sessionStorage.setItem("dt.v3.session", JSON.stringify(state.session));
-    connect();
+    if (!stored?.device_id || !stored.device_secret) {resumePending = false; return false;}
+    resumePending = true;
     update();
-    toast("已用记住的设备续接");
-    return true;
+    window.clearTimeout(reconnectTimer);
+    try {
+      const res = await fetch("/v3/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: stored.device_id, device_secret: stored.device_secret }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        if (res.status === 400 && ["device expired", "device mismatch"].includes(body.error)) {
+          localStorage.removeItem(DEVICE_KEY);
+          resumePending = false;
+          update();
+          toast("此配对已过期或被撤销，请重新扫码；草稿仍在");
+          return false;
+        }
+        throw new Error("resume unavailable");
+      }
+      state.session = await res.json();
+      resumePending = false;
+      try {sessionStorage.setItem("dt.v3.session", JSON.stringify(state.session));} catch { /* local credential still persists */ }
+      const clean = new URL(location.href); clean.searchParams.delete("pair");
+      history.replaceState(history.state, "", clean.pathname + clean.search + clean.hash);
+      if (document.getElementById("pairStatus")) closeSheet();
+      connect(); update();
+      return true;
+    } catch {
+      // 离线/超时/服务暂未启动不代表配对失效；保留凭据并自动再试。
+      reconnectTimer = window.setTimeout(() => {void recoverConnection(true);}, 3000);
+      update();
+      return true;
+    }
   }
 
   async function submitPair(code: string, panelVersion: number): Promise<boolean> {
+    if (await resumeRemembered()) return true;
     const res = await fetch("/v3/pair", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1458,8 +1511,7 @@ export function boot(root: HTMLElement): void {
   void restoreDraft().then(async () => {
     ($("text") as HTMLTextAreaElement).disabled = false;
     update(); persistDraft();
-    if (state.session) connect();
-    else if (!await resumeRemembered()) showPair();
+    await recoverConnection(true);
   }).catch(() => {
     restored = true;
     ($("text") as HTMLTextAreaElement).disabled = false;

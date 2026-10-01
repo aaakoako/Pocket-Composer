@@ -109,7 +109,9 @@ class AuthService:
             for item in self.trusted.values()
             if time.time() <= item.expires_at
         ]
-        self.store_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        from doubao_typeless.storage.draft_snapshot import write_json_atomic
+
+        write_json_atomic(self.store_path, payload)
 
     def current_pairing_challenge(self) -> str | None:
         challenge = self._live_challenge()
@@ -178,6 +180,8 @@ class AuthService:
         if existing is not None and time.time() <= existing.expires_at:
             session.remembered = True
             session.expires_at = existing.expires_at
+            session.device_secret_once = next((s.device_secret_once for s in self.sessions.values()
+                                               if s.device_id == session.device_id and s.device_secret_once), "")
             return session.device_secret_once
         secret = secrets.token_urlsafe(24)
         session.remembered = True
@@ -194,9 +198,17 @@ class AuthService:
         return secret
 
     def take_device_secret(self, session: Session) -> str:
-        secret = session.device_secret_once
-        session.device_secret_once = ""
-        return secret
+        # HTTP/WS 发送成功不等于手机已保存。允许重取，收到凭据确认才清除。
+        return session.device_secret_once
+
+    def acknowledge_device_secret(self, session: Session, secret: str) -> None:
+        item = self.trusted.get(session.device_id)
+        digest = hashlib.sha256(str(secret or "").encode("utf-8")).hexdigest()
+        if item is None or time.time() > item.expires_at or not hmac.compare_digest(item.secret_hash, digest):
+            raise ValueError("device mismatch")
+        for other in self.sessions.values():
+            if other.device_id == session.device_id:
+                other.device_secret_once = ""
 
     def resume_trusted(self, device_id: str, device_secret: str) -> Session:
         item = self.trusted.get(str(device_id or ""))
@@ -217,6 +229,7 @@ class AuthService:
             remembered=True,
         )
         self.sessions[session.session_id] = session
+        self.acknowledge_device_secret(session, device_secret)
         return session
 
     def authorize(self, session_id: str, token: str, action: str) -> Session:
@@ -261,6 +274,8 @@ class AuthService:
         return session
 
     def public_sessions(self) -> list[dict]:
+        # 一个设备可以有多个标签页/续接会话，授权列表按设备展示。
+        devices = {s.device_id: s for s in self.sessions.values() if time.time() <= s.expires_at}
         return [
             {
                 "session_id": s.session_id,
@@ -269,9 +284,9 @@ class AuthService:
                 "allow_capture": s.allow_capture,
                 "allow_sync": s.allow_sync,
                 "remembered": s.remembered,
+                "remember_pending": bool(s.device_secret_once),
             }
-            for s in self.sessions.values()
-            if time.time() <= s.expires_at
+            for s in devices.values()
         ]
 
     def revoke(self, session_id: str) -> bool:

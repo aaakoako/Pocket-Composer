@@ -420,13 +420,13 @@ class V3App:
         return payload
 
     def remember_connected(self) -> int:
-        count = 0
+        devices = set()
         loop = getattr(self, "_loop", None)
         for session in list(self.auth.sessions.values()):
             if time.time() > session.expires_at:
                 continue
             secret = self.auth.remember_device(session)
-            count += 1
+            devices.add(session.device_id)
             if secret and loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self.bridge.send_to_session(
@@ -439,7 +439,7 @@ class V3App:
                     ),
                     loop,
                 )
-        return count
+        return len(devices)
 
     def forget_connected(self) -> int:
         ids = {s.device_id for s in self.auth.sessions.values()}

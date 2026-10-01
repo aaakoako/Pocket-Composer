@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "product_goal": "Pocket Composer 0.5.5 Windows 正式发行，Jev 分段参考侧栏与输入优先布局。",
+  "product_goal": "Pocket Composer 0.5.6 手机记住配对与自动续接修复候选",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "PR #11 已合入 master；v0.5.5 已公开并设为 latest；Mac/Linux 仍为独立体验版。",
+  "working_tree": "fix/remembered-phone-reconnect；基于公开 0.5.5 的 acc643d；未覆盖日用数据或发布版本",
   "source_base": "5198c5c888af9541e118d82dc1026655abb9dceb",
-  "last_completed_slice": "WINDOWS_0_5_5_STABLE_JEV_SIDEBAR",
-  "active_slice": null,
-  "next_action": "收集新版侧栏的真实使用反馈；Mac/Linux 继续按独立体验版边界验证，未将模型参考条视为任务成功率。",
+  "last_completed_slice": "REMEMBERED_PHONE_RECONNECT",
+  "active_slice": "PACKAGE_RECONNECT_CANDIDATE",
+  "next_action": "生成隔离候选包并检查启动；真实手机后台冻结及跨 Wi-Fi 续接仍需实机验收",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",

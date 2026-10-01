@@ -10,7 +10,7 @@ from doubao_typeless.core.bundle import Draft
 from doubao_typeless.services.assets import resolve_asset_refs
 
 
-def write_json_atomic(path: Path, payload: dict) -> None:
+def write_json_atomic(path: Path, payload: dict | list) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     try:

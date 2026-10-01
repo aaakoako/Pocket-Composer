@@ -26,7 +26,9 @@ async def product(tmp_path, *, touch=False):
     errors=[];uploads=[]
     try:
         async with async_playwright() as pw:
-            browser=await pw.chromium.launch();page=await browser.new_page(viewport={'width':390,'height':844},has_touch=touch,is_mobile=touch)
+            browser=await pw.chromium.launch()
+            context=await browser.new_context(viewport={'width':390,'height':844},has_touch=touch,is_mobile=touch)
+            page=await context.new_page()
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.on('request',lambda req:uploads.append(req.url) if req.method=='POST' and req.url.endswith('/v3/assets/init') else None)
             await page.goto(f'http://127.0.0.1:{port}/?pair={app.auth.new_pairing_challenge()}')

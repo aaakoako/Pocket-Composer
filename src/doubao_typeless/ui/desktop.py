@@ -1043,7 +1043,7 @@ class ClientWindow:
         count = self.app.remember_connected()
         self.device_box.setText(
             (self.device_box.text() + "\n" if self.device_box.text() else "")
-            + (f"已记住 {count} 台设备，30 天内可直接续接。" if count else "还没有已连接的手机可记住。")
+            + (f"正在让 {count} 台手机保存配对，保存后 30 天内可自动续接。" if count else "还没有已连接的手机可记住。")
         )
 
     def refresh(self) -> None:
@@ -1062,7 +1062,7 @@ class ClientWindow:
         sessions = self.app.auth.public_sessions()
         online = self.app.bridge.online_device_ids()
         self._refresh_phone_status()
-        sig = tuple((s["session_id"], s["allow_insert"], s["allow_capture"], s["device_id"] in online) for s in sessions)
+        sig = tuple((s["session_id"], s["allow_insert"], s["allow_capture"], s["remembered"], s["remember_pending"], s["device_id"] in online) for s in sessions)
         if sig != self._session_sig:
             self._session_sig = sig
             self._clear_grant_row()
@@ -1085,6 +1085,7 @@ class ClientWindow:
                     lines.append(
                         f"{name} · {'在线' if item['device_id'] in online else '离线，电脑保留最后收到的稿'}  插入={'开' if item['allow_insert'] else '关'}  "
                         f"截图={'开' if item['allow_capture'] else '关'}"
+                        + (" · 等待手机保存配对" if item["remember_pending"] else " · 已记住" if item["remembered"] else "")
                     )
                     sid = item["session_id"]
                     allow_i = QPushButton("允许插入" if not item["allow_insert"] else "关闭插入")
