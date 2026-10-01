@@ -2,11 +2,11 @@
   "schema_version": 1,
   "product_goal": "Pocket Composer 0.5.6 手机记住配对与自动续接修复候选 + Opus 5.5 发布前审查修复",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "fix/opus55-product-review；segment01-05均经Codex复核；提交后待新HEAD远端构建，无正式发布",
+  "working_tree": "0.5.6 发布准备；产品候选42dddc3远端完整构建通过，当前仅整理发布文档；用户已授权合入master并正式发布",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
   "last_completed_slice": "OPUS55_REVIEW_FIXES",
   "active_slice": null,
-  "next_action": "本地主审27项独立用例通过，Opus源码全量812通过2跳过；重跑新HEAD的GitHub候选构建。旧33fe6c9构建失败记录保留，旧221500b包不包含修复；新包、实机与正式发布尚未完成。",
+  "next_action": "合入master并将v0.5.6绑定到合并提交；正式渠道重建，验证包内来源/文件摘要及原生证据后公开Release；实机手机与Codex/Cursor验收仍未完成",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -707,5 +707,14 @@
         "新 HEAD 的 GitHub CI 尚未运行"
       ]
     }
+  },
+  "release_056_candidate_evidence": {
+    "source_sha": "42dddc33acb8532e216775537845ec6ef8f1f0e5",
+    "workflow": "https://github.com/aaakoako/Pocket-Composer/actions/runs/36841934765",
+    "windows": "813 passed, 1 skipped",
+    "linux": "803 passed, 11 skipped",
+    "independent": "27 passed",
+    "frozen_windows": "startup/native text/phone-primary/browser14/installer/legacy0.4.2/failure recovery passed",
+    "real_user_acceptance": false
   }
 }
