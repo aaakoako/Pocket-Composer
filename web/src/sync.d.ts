@@ -9,9 +9,10 @@ export function buildPrimaryUpdate(state: SyncState & {generation?: number}, upd
 export function rotatePrimary(state: SyncState & {generation?: number}, msg:any, makeId:()=>string): "kept"|"cleared";
 export class DraftOutbox {
   constructor(options: {send:(message:any)=>void; persist:()=>Promise<void>; onState?:(state:string)=>void;
-    timer?:(fn:()=>void,ms:number)=>any;cancel?:(id:any)=>void;retryMs?:number;debounceMs?:number});
-  latest: any; flight: any; acked: string|null;
+    timer?:(fn:()=>void,ms:number)=>any;cancel?:(id:any)=>void;retryMs?:number;debounceMs?:number;
+    minIntervalMs?:number;backoffMs?:number;now?:()=>number});
+  latest: any; flight: any; ready: any; acked: string|null; online: boolean; failure: string|null;
   offer(message:any):void;connect():void;disconnect():void;close():void;
-  acknowledge(ack:any):boolean;reject(ack:any):void;
+  acknowledge(ack:any):boolean;reject(ack:any):void;defer(ack:any):boolean;
   flush(id?:string,timeoutMs?:number):Promise<void>;
 }

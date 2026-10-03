@@ -7,13 +7,13 @@ import pytest
 from tests.test_v3_editor_transactions import product, synced
 from tests.test_v3_frontend_prod import READ_DRAFT
 
-ALL_RECORDS = """() => new Promise(resolve=>{const r=indexedDB.open('doubao-typeless-v3-drafts',1);
+ALL_RECORDS = """() => new Promise(resolve=>{const r=indexedDB.open('doubao-typeless-v3-drafts');
 r.onsuccess=()=>{const tx=r.result.transaction('drafts','readonly'),q=tx.objectStore('drafts').getAllKeys(),v=tx.objectStore('drafts').getAll();
 tx.oncomplete=()=>{resolve(q.result.map((k,i)=>[String(k),v.result[i]&&v.result[i].text]));r.result.close();};};})"""
-# 让最后一句在接管时确实只在内存里：本地写盘防抖（120ms）与同步外发防抖（100ms，外发前会写盘）
-# 都要拖住。只拖 120ms 时，接管若晚于 100ms，这句已正常写进主稿并显示在新页面，场景就不再是“未保存”。
+# 让最后一句在接管时确实只在内存里：本地写盘防抖（120ms，离线时使用）与同步外发合并窗口（16ms，外发前会写盘）
+# 都要拖住。只拖 120ms 时，这句已经由发件箱正常写进主稿并显示在新页面，场景就不再是“未保存”。
 SLOW_DEBOUNCE = """() => {const original=window.setTimeout;
-window.setTimeout=(fn,ms,...args)=>original(fn,(ms===120||ms===100)?60000:ms,...args);}"""
+window.setTimeout=(fn,ms,...args)=>original(fn,(ms===120||ms===16)?60000:ms,...args);}"""
 PENDING = '接管前刚说完、还在 120ms 防抖里的最后一句'
 
 

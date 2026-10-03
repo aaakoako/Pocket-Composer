@@ -164,6 +164,9 @@ class V3App:
                 self._desktop_edit = raw_edit
         except (OSError, ValueError):
             pass
+        # 界面定时器读的“最近一次完整状态”；任何时刻都是某一版的完整身份+文本。
+        self._identity_cache = None
+        self.input_check_identity()
         self.bridge = V3Bridge(
             port=self.port,
             auth=self.auth,
@@ -543,7 +546,11 @@ class V3App:
 
     def apply_phone_update(self, data: dict, *, allow_server_assets: bool = False) -> dict:
         with self._state_lock:
-            return self._apply_phone_update(data, allow_server_assets=allow_server_assets)
+            try:
+                return self._apply_phone_update(data, allow_server_assets=allow_server_assets)
+            finally:
+                # 写盘完成（或失败回滚）后发布给界面；写盘期间界面读到的仍是上一版完整状态。
+                self._publish_identity()
 
     def _apply_phone_update(self, data: dict, *, allow_server_assets: bool = False) -> dict:
         if data.get("authority") == "phone":
@@ -1259,12 +1266,27 @@ class V3App:
             self._save_draft()
         self._last_suggestion = None
 
-    def input_check_identity(self):
-        with self._state_lock:
-            return (self.draft.draft_id, self.draft.epoch, self.draft.revision, self.review_text())
+    def _publish_identity(self):
+        """调用方持有 _state_lock：此刻的身份、修订和文本属于同一版。"""
+        identity = (self.draft.draft_id, self.draft.epoch, self.draft.revision, self.review_text())
+        self._identity_cache = identity
+        return identity
+
+    def input_check_identity(self, *, wait: bool = True):
+        """当前稿的检查身份。
+
+        wait=False 给界面定时刷新用：状态锁正被写盘等操作占用时，不等待，返回最近一次完整发布的
+        身份（同一版的 id/epoch/revision/文本，从不拼接新旧字段），下一次刷新再追上。
+        用户操作（复制附注、重新检查）仍等待锁，保证作用在当前稿上。"""
+        if not self._state_lock.acquire(blocking=wait):
+            return self._identity_cache
+        try:
+            return self._publish_identity()
+        finally:
+            self._state_lock.release()
 
     def input_check_tick(self):
-        identity = self.input_check_identity()
+        identity = self.input_check_identity(wait=False)
         self.input_check.observe(identity, identity[-1])
         return self.input_check.view(identity)
 

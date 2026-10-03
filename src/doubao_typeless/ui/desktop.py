@@ -307,11 +307,38 @@ class ReviewPanel:
         self._editing = False
         self.app.review_editing = False
         self.banner.hide()
-        self.editor.blockSignals(True)
-        self.editor.setPlainText(self.app.review_text() or "")
-        self.editor.blockSignals(False)
+        self._set_text_preserving(self.app.review_text() or "")
         self._refresh_images()
         self._sync_buttons()
+
+    def _set_text_preserving(self, text: str) -> None:
+        """手机连续更新时只替换变化的尾部：用户的阅读位置和选区不被顶回开头或末尾。"""
+        from PySide6.QtGui import QTextCursor
+        from doubao_typeless.ui.live_text import clamp_position, replace_tail
+        editor = self.editor
+        old = editor.toPlainText()
+        if old == text:
+            return
+        bar = editor.verticalScrollBar()
+        cursor = editor.textCursor()
+        selecting = cursor.hasSelection()
+        following = not selecting and bar.value() >= bar.maximum() - 4
+        position, anchor, value = cursor.position(), cursor.anchor(), bar.value()
+        editor.blockSignals(True)
+        try:
+            # 只改变化点之后的文字；变化点之前的选区/光标原样不动。
+            replace_tail(editor.document(), old, text)
+            if not following:
+                # 改动覆盖到阅读位置时 Qt 会收拢选区：按原 UTF-16 位置恢复（夹到文档范围内）。
+                restored = editor.textCursor()
+                if (restored.anchor(), restored.position()) != (anchor, position):
+                    document = editor.document()
+                    restored.setPosition(clamp_position(document, anchor))
+                    restored.setPosition(clamp_position(document, position), QTextCursor.KeepAnchor)
+                    editor.setTextCursor(restored)
+        finally:
+            editor.blockSignals(False)
+        bar.setValue(bar.maximum() if following else min(value, bar.maximum()))
 
     def note_phone_pending(self) -> None:
         if not self._editing:
@@ -348,6 +375,12 @@ class ReviewPanel:
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import QLabel, QPushButton
 
+        # 图片没变时不重读/重解码原图；手机每说一句都会触发这里。
+        signature = tuple((a.get("asset_id"), a.get("status"), a.get("render_revision"))
+                          for a in self.app.draft.assets)
+        if signature == getattr(self, "_image_signature", None):
+            return
+        self._image_signature = signature
         previews = self.app.draft_image_previews()
         if not previews:
             self.images.setText("没有图片")
@@ -1497,11 +1530,18 @@ class DesktopShell:
         elif event == "phone_pending":
             QTimer.singleShot(0, host, self.review.note_phone_pending)
         elif event == "activity":
-            QTimer.singleShot(0, host, self.client.refresh)
-            def refresh_visible_review():
+            # 手机每句同步都会触发；合并为一次刷新，避免连接页/审阅窗在 GUI 队列里积压。
+            if getattr(self, "_activity_pending", False):
+                return
+            self._activity_pending = True
+            def refresh_activity():
+                self._activity_pending = False
+                # 连接页隐藏时打开会自行刷新；不为每句话读设置文件、重建设备列表。
+                if self.client.widget.isVisible():
+                    self.client.refresh()
                 if self.review.widget.isVisible() and not self.review._editing:
                     self.review.reload()
-            QTimer.singleShot(0, self.review.widget, refresh_visible_review)
+            QTimer.singleShot(0, host, refresh_activity)
         elif event == "expand_reference":
             def open_reference():
                 self.review.input_check_details.expand.setChecked(True)

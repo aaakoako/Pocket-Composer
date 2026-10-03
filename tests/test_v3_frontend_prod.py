@@ -70,13 +70,27 @@ def test_production_frontend_syncs_text_without_extra_fields(tmp_path):
 
 
 READ_DRAFT = """() => new Promise(resolve => {
-  const r=indexedDB.open('doubao-typeless-v3-drafts',1);
+  const r=indexedDB.open('doubao-typeless-v3-drafts');
   r.onsuccess=()=>{
     const db=r.result;
     if(!db.objectStoreNames.contains('drafts')){db.close();resolve(null);return;}
     const tx=db.transaction('drafts','readonly');
-    const q=tx.objectStore('drafts').get('current');
-    tx.oncomplete=()=>{db.close();resolve(q.result||null);};
+    const store=tx.objectStore('drafts');
+    const q=store.get('current');
+    // 大字段另存为 payload-* 记录：同一读事务内换回内容，断言的是“已落盘的内容”而不是存储格式。
+    let value=null;
+    const swap=(node,map)=>{
+      if(node&&typeof node==='object'&&!Array.isArray(node)&&typeof node.$payload==='string'&&Object.keys(node).length===1)return map.get(node.$payload);
+      if(Array.isArray(node))return node.map(x=>swap(x,map));
+      if(node&&typeof node==='object'&&Object.getPrototypeOf(node)===Object.prototype){const o={};for(const[k,v]of Object.entries(node)){const n=swap(v,map);if(n!==undefined)o[k]=n;}return o;}
+      return node;};
+    q.onsuccess=()=>{
+      value=q.result||null;if(!value||!Array.isArray(value.assets))return;
+      const refs=new Set();const walk=n=>{if(n&&typeof n==='object'){if(typeof n.$payload==='string')refs.add(n.$payload);else Object.values(n).forEach(walk);}};
+      walk(value.assets);const map=new Map();let left=refs.size;
+      for(const k of refs){const g=store.get(k);g.onsuccess=()=>{map.set(k,g.result);if(--left===0)value={...value,assets:swap(value.assets,map)};};}
+    };
+    tx.oncomplete=()=>{db.close();resolve(value);};
     tx.onabort=()=>{db.close();resolve(null);};
   };
   r.onerror=()=>resolve(null);
@@ -197,7 +211,7 @@ def test_production_offline_photo_is_local_then_wakes_pc_with_rendered_version(t
                     if saved and saved.get('assets') and saved['assets'][0].get('status')=='queued':break
                     await asyncio.sleep(.05)
                 assert saved and saved['text']=='离线画好再同步'
-                assert await page.evaluate('''async()=>{const r=indexedDB.open('doubao-typeless-v3-drafts',1);return await new Promise(resolve=>{r.onsuccess=()=>{const db=r.result,t=db.transaction('drafts'),q=t.objectStore('drafts').get('current');t.oncomplete=()=>{resolve(q.result.assets[0].pending_png instanceof Blob);db.close()}}})}''')
+                assert await page.evaluate('''async()=>{const r=indexedDB.open('doubao-typeless-v3-drafts');return await new Promise(resolve=>{r.onsuccess=()=>{const db=r.result,t=db.transaction('drafts'),q=t.objectStore('drafts').get('current');t.oncomplete=()=>{resolve(q.result.assets[0].pending_png instanceof Blob);db.close()}}})}''')
                 assert not app.draft.assets
                 await page.context.set_offline(False)
                 for _ in range(300):

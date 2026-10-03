@@ -173,7 +173,7 @@ class InputCheckDetails(QWidget):
         layout.addLayout(actions)
         self._timer = QTimer(self); self._timer.setInterval(250)
         def refresh():
-            result = app.input_check.view(app.input_check_identity())
+            result = app.input_check.view(app.input_check_identity(wait=False))  # 定时刷新不等写盘锁
             if feedback is not None:
                 feedback.configure(app.input_check.options.get('ui_motion',True))
                 feedback.set_tone(result.get('tone_kind',''))

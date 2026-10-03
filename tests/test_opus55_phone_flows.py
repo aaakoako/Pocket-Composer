@@ -182,7 +182,7 @@ FAULT = """
 
 
 SIDE_HAS = """text => new Promise(resolve => {
-  const r = indexedDB.open('doubao-typeless-v3-drafts', 1);
+  const r = indexedDB.open('doubao-typeless-v3-drafts');
   r.onsuccess = () => {
     const tx = r.result.transaction('drafts', 'readonly');
     const keys = tx.objectStore('drafts').getAllKeys(), values = tx.objectStore('drafts').getAll();

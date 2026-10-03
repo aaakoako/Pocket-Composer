@@ -6,7 +6,8 @@ import re
 def input_kind(role, description, *, editable, protected=False):
     if protected or 'password' in role.lower() or 'secure' in role.lower():
         return 'password'
-    special = classify_focus(description)
+    # 无障碍角色本身（如 AT-SPI 的 terminal）也是身份；不能只看名称/描述。
+    special = classify_focus(description, role)
     if special in {'terminal', 'code'}:
         return special
     if not editable:

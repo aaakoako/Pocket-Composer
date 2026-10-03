@@ -95,14 +95,21 @@ export function rotatePrimary(state, msg, makeId) {
   return "cleared";
 }
 
-/** 一个在途快照 + 一个合并后的最新快照。只重试数据，从不重试插入命令。 */
+/** 一个在途快照 + 一个已落盘待发快照 + 一个合并后的最新快照。只重试数据，从不重试插入命令。
+ * 等待电脑 ACK 时就把下一份快照写入手机存储（流水线），ACK 一到即可发出，
+ * 慢存储不会让每一跳都串行等待“写盘 + 往返”。
+ * 发送间隔至少 minIntervalMs：本地 ACK 只要几毫秒，连续快速输入若每份都发会超过电脑端的
+ * 连接限速（被拒后整条同步停住）。空闲后的第一份立即发出；间隔内新到的编辑只替换待发快照，
+ * 最后一份总会在间隔结束后发出。电脑仍回 rate limited 时退回待发并稍后重发，不当作冲突。 */
 export class DraftOutbox {
   constructor({send, persist, onState = () => {}, timer = (fn, ms) => setTimeout(fn, ms),
-               cancel = id => clearTimeout(id), retryMs = 1600, debounceMs = 0}) {
-    Object.assign(this, {send, persist, onState, timer, cancel, retryMs, debounceMs});
-    this.latest = null; this.flight = null; this.acked = null; this.online = false;
+               cancel = id => clearTimeout(id), retryMs = 1600, debounceMs = 0,
+               minIntervalMs = 0, backoffMs = 1000, now = () => Date.now()}) {
+    Object.assign(this, {send, persist, onState, timer, cancel, retryMs, debounceMs, minIntervalMs, backoffMs, now});
+    this.latest = null; this.flight = null; this.ready = null; this.acked = null; this.online = false;
     this.timeout = null; this.preparing = false; this.closed = false; this.waiters = [];
     this.failure = null; this.connectionVersion = 0;
+    this.lastSentAt = -Infinity; this.holdUntil = -Infinity; this.wakeTimer = null;
   }
   offer(message) {
     this.latest = structuredClone(message); this.failure = null;
@@ -111,40 +118,60 @@ export class DraftOutbox {
   }
   connect() {
     this.connectionVersion++;
-    this.online = true; this.flight = null; this.acked = null; this.failure = null;
-    this.cancel(this.timeout); void this.pump();
+    this.online = true; this.flight = null; this.ready = null; this.acked = null; this.failure = null;
+    this.holdUntil = -Infinity;
+    this.cancel(this.timeout); this.stopWake(); void this.pump();
   }
   disconnect() {
     this.connectionVersion++;
-    this.online = false; this.flight = null; this.cancel(this.timeout);
+    this.online = false; this.flight = null; this.ready = null; this.cancel(this.timeout); this.stopWake();
     this.onState("offline");
   }
+  stopWake() { if (this.wakeTimer !== null) { this.cancel(this.wakeTimer); this.wakeTimer = null; } }
+  /** 距离下一次允许发送还有多少毫秒（发送间隔与限速退避取较晚者）。 */
+  sendDelay() {
+    return Math.max(this.lastSentAt + this.minIntervalMs, this.holdUntil) - this.now();
+  }
   async pump() {
-    if (this.closed || !this.online || this.flight || this.preparing || !this.latest || this.failure) return;
-    if (this.acked === this.latest.update_id) { this.onState("synced"); this.settle(); return; }
+    if (this.closed || !this.online || !this.latest || this.failure) return;
+    if (!this.flight && this.ready) {
+      const wait = this.sendDelay();
+      if (wait > 0) {
+        if (this.wakeTimer === null) this.wakeTimer = this.timer(() => { this.wakeTimer = null; void this.pump(); }, wait);
+      } else {
+        // 已在本连接落盘的快照：上一份 ACK 且间隔已到后立即发出。
+        this.flight = this.ready; this.ready = null; this.transmit();
+      }
+    }
+    if (this.preparing) return;
+    const id = this.latest.update_id;
+    if (!this.flight && !this.ready && this.acked === id) { this.onState("synced"); this.settle(); return; }
+    if (this.acked === id || this.flight?.update_id === id || this.ready?.update_id === id) return;
     this.preparing = true;
     // 固定这次即将发出的快照。等待本地写盘/合并窗口时产生的新编辑只替换 latest，
-    // 不得使本次快照无限延期，也不能合并掉图片从编辑/上传中到成品的首个通知。
-    // 内存始终只保留一个在途快照和一个最新快照；ACK后再发送最新版本。
+    // 不得使本次快照无限延期。内存最多保留一个在途、一个已落盘待发和一个最新快照；
+    // 待发快照未发出前又准备好更新的一份，就由更新的一份替换（电脑只需要最新版）。
     const preparingMessage = structuredClone(this.latest);
     const connection = this.connectionVersion;
+    let prepared = false;
     try {
       if (this.debounceMs) await new Promise(resolve => this.timer(resolve, this.debounceMs));
       if (!this.online || this.closed || connection !== this.connectionVersion) return;
       await this.persist();
-      if (!this.online || this.closed || !this.latest || connection !== this.connectionVersion) return;
-      this.flight = preparingMessage;
-      this.transmit();
+      if (!this.online || this.closed || !this.latest || connection !== this.connectionVersion || this.failure) return;
+      prepared = true;
+      this.ready = preparingMessage;
     } catch { this.onState("save_failed"); }
     finally {
       this.preparing = false;
-      // 断开后重连时，旧连接等待写盘的快照不可跨会话发出。
-      if (this.online && !this.closed && connection !== this.connectionVersion) void this.pump();
+      // 断开后重连时，旧连接等待写盘的快照不可跨会话发出；准备好则尝试发出，期间又有新编辑则继续准备下一份。
+      if (this.online && !this.closed && (connection !== this.connectionVersion || prepared)) void this.pump();
     }
   }
   transmit() {
     if (!this.flight || !this.online || this.closed) return;
     this.cancel(this.timeout);
+    this.lastSentAt = this.now();
     try { this.send(this.flight); this.onState("syncing"); }
     catch { this.onState("offline"); }
     this.timeout = this.timer(() => {
@@ -161,9 +188,19 @@ export class DraftOutbox {
     this.cancel(this.timeout); this.acked = f.update_id; this.flight = null;
     this.settle(); void this.pump(); return true;
   }
+  /** 电脑因连接限速拒收这份快照：不是内容冲突。退回待发（已有更新的待发则用更新的），稍后重发。 */
+  defer(ack) {
+    const f = this.flight;
+    if (!f || !ack?.update_id || ack.update_id !== f.update_id) return false;
+    this.cancel(this.timeout); this.flight = null;
+    if (!this.ready) this.ready = f;
+    this.holdUntil = this.now() + this.backoffMs;
+    this.onState("retrying"); void this.pump(); return true;
+  }
   reject(ack) {
-    if (ack.update_id !== this.flight?.update_id) return;
-    this.cancel(this.timeout); this.flight = null; this.failure = ack.error || "SYNC_REJECTED";
+    // 只有对应在途快照的拒绝才停止同步；与草稿无关的错误（心跳、其他请求）不影响 outbox。
+    if (!this.flight || !ack?.update_id || ack.update_id !== this.flight.update_id) return;
+    this.cancel(this.timeout); this.flight = null; this.ready = null; this.failure = ack.error || "SYNC_REJECTED";
     this.onState("conflict"); this.settle();
   }
   settle() {
@@ -187,7 +224,7 @@ export class DraftOutbox {
     });
   }
   close() {
-    this.closed = true; this.disconnect();
+    this.closed = true; this.disconnect(); this.stopWake();
     for (const w of [...this.waiters]) w.done(new Error("CLOSED"));
   }
 }

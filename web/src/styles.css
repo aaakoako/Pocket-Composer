@@ -96,7 +96,10 @@ button{white-space:normal;overflow-wrap:anywhere}
 .sync-track i{position:absolute;width:6px;height:6px;top:-2px;left:0;background:var(--accent);border-radius:50%;opacity:0}
 .sync-map[data-state="syncing"],.sync-map[data-state="retrying"],.sync-map[data-state="synced"]{color:var(--accent)}
 .sync-map[data-state="uploading"] .sync-track i,.sync-map[data-state="syncing"] .sync-track i,.sync-map[data-state="retrying"] .sync-track i{opacity:1;animation:sync-travel 1.15s ease-in-out infinite}
-.sync-map[data-state="synced"] .sync-track{background:var(--accent)}
+.sync-map[data-state="synced"] .sync-track,.sync-map[data-state="live"] .sync-track{background:var(--accent)}
+.sync-map[data-state="live"]{color:var(--accent)}
+.sync-map[data-state="lagging"] .sync-track i{opacity:1;animation:sync-travel 1.15s ease-in-out infinite}
+.sync-map[data-state="lagging"] .sync-mark::after{content:"…";color:var(--danger)}
 .sync-mark{width:16px;text-align:center;font-size:15px}
 .sync-map[data-state="synced"] .sync-mark::after{content:"✓"}
 .sync-map[data-state="conflict"] .sync-mark::after,.sync-map[data-state="save_failed"] .sync-mark::after{content:"!";color:var(--danger)}
