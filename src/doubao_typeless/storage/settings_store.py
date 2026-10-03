@@ -135,7 +135,7 @@ ALLOWED = {
 }
 
 
-def save_settings(data_dir: Path, payload: dict[str, Any]) -> None:
+def save_settings(data_dir: Path, payload: dict[str, Any]) -> list[str]:
     path = settings_path(data_dir)
     current = load_settings(data_dir)
     previous_endpoint = str(current.get("byok_endpoint") or "")
@@ -150,11 +150,12 @@ def save_settings(data_dir: Path, payload: dict[str, Any]) -> None:
     if (endpoint_authority(previous_jev_endpoint)!=endpoint_authority(current.get('jev_custom_endpoint',''))
             and current.get('jev_custom_key')==previous_jev_key and not payload.get('jev_custom_key_reentered')):
         current['jev_custom_key']=''
-    put_secret(data_dir, "byok_api_key", str(current.get("byok_api_key") or ""))
-    put_secret(data_dir, "jev_api_key", str(current.get("jev_api_key") or ""))
-    put_secret(data_dir, "jev_vercel_key", str(current.get("jev_vercel_key") or ""))
-    put_secret(data_dir,"jev_openrouter_key",str(current.get('jev_openrouter_key') or ''))
-    put_secret(data_dir,"jev_custom_key",str(current.get('jev_custom_key') or ''))
+    from doubao_typeless.storage.secret_store import CLEANUP_WARNING
+    warnings = []
+    for name in ("byok_api_key", "jev_api_key", "jev_vercel_key", "jev_openrouter_key", "jev_custom_key"):
+        if put_secret(data_dir, name, str(current.get(name) or "")) == "os_cleanup_pending":
+            if CLEANUP_WARNING not in warnings:
+                warnings.append(CLEANUP_WARNING)
     on_disk = dict(current)
     on_disk["byok_api_key"] = ""
     on_disk["jev_api_key"] = ""
@@ -165,3 +166,4 @@ def save_settings(data_dir: Path, payload: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(on_disk, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
+    return warnings

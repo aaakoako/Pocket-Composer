@@ -2,14 +2,14 @@
 
 > 仓库现已更名为 [Pocket-Composer](https://github.com/aaakoako/Pocket-Composer)。旧版内置自动更新不再维护；请从新仓库手动下载安装。现有数据目录保持不变。
 
-**当前 Windows 稳定版：0.5.7**（[发布说明](0.5.7-live-sync.md)）：改进手机连续输入时电脑跟随的速度与状态提示。macOS/Linux 仍为体验版，见 [跨平台说明](CROSS_PLATFORM.md)。
+**当前 Windows 稳定版：0.5.8**（[发布说明](0.5.8-live-sync.md)）：改进手机连续输入时电脑跟随的速度与状态提示。macOS/Linux 仍为体验版，见 [跨平台说明](CROSS_PLATFORM.md)。
 
 安装包和便携包包含同一套 Windows 客户端与手机页面。下载文件名保留旧标识 `DoubaoTypeless_<版本>_win_x64_Setup.exe` 供更新器识别，产品名称为 Pocket Composer。版本标注“发布候选”时，仍需完成真实手机和目标输入框验收；这不代表已经公开发布。
 
 ## 开始使用
 
 1. 从旧版托盘正常退出，保留旧目录和数据。
-2. 从 [Releases](https://github.com/aaakoako/Pocket-Composer/releases/latest) 下载并运行 `DoubaoTypeless_<版本>_win_x64_Setup.exe`（当前稳定版为 0.5.7）。仅为当前 Windows 用户安装，无需管理员权限。以后从开始菜单打开 **Pocket Composer**（安装目录与可执行文件名仍为 DoubaoTypeless）。
+2. 从 [Releases](https://github.com/aaakoako/Pocket-Composer/releases/latest) 下载并运行 `DoubaoTypeless_<版本>_win_x64_Setup.exe`（当前稳定版为 0.5.8）。仅为当前 Windows 用户安装，无需管理员权限。以后从开始菜单打开 **Pocket Composer**（安装目录与可执行文件名仍为 DoubaoTypeless）。
 3. 手机与电脑接入同一网络，扫描电脑连接页的二维码。地址和端口以该页为准，不沿用旧预览端口。
 4. 在电脑连接页允许手机插入。点一下 Codex/Cursor 的对话输入框，再用手机说话、加入图片，点“插入电脑”。插入不会自动发送消息。
 5. 插入后手机可开始下一段。需要上一段时使用“恢复”；不要重复点插入来猜测图片是否已经进入目标。

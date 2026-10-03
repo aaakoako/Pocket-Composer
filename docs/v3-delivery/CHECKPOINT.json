@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "product_goal": "Pocket Composer 0.5.7 候选：手机连续输入时电脑实时跟随 + PR12 审查修复",
+  "product_goal": "Pocket Composer 0.5.8 稳定版发布：同步修复、凭据清理提示和统一入口",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "fix/live-sync-and-review-20261003；Opus 修复与 Codex 独立源码验收完成，等待确切提交的候选构建",
+  "working_tree": "release/0.5.8；用户已明确授权直接发布最新版本；0.5.7 发布构建取消，标签保留",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
-  "last_completed_slice": "LIVE_SYNC_0_5_7_INDEPENDENT_REVIEW",
+  "last_completed_slice": "RELEASE_0_5_8_REVIEW_FOLLOWUPS",
   "active_slice": null,
-  "next_action": "提交隔离分支并运行 Release workflow_dispatch；核对 Windows/Linux 回归、安装升级与原生输入证据，下载校验候选包。暂不合并、打标签或发布稳定版。",
+  "next_action": "本提交通过回归后合入主分支、打 v0.5.8 标签；校验正式渠道构建与资产后公开设为 latest，再验证无登录下载和更新发现。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -21,7 +21,8 @@
     "不自动弹出图文恢复窗口；失败可复制时提供手动粘贴退路；白板文字使用可退出的页面内编辑",
     "手机一键清空文字与图片，原稿原子备份可恢复；清空取消未发出的插入准备和旧异步结果，不撤回已贴入电脑的内容。",
     "框架级整体替换，保留旧数据但不自动迁移；升级须完整下载校验、退出、部署并确认新版就绪，失败可恢复。",
-    "Jev可选疑似转写错误、歧义/缺项和语气判断；附注仅提示可能有误，不要求目标模型追问；异步检查不阻挡复制插入。"
+    "Jev可选疑似转写错误、歧义/缺项和语气判断；附注仅提示可能有误，不要求目标模型追问；异步检查不阻挡复制插入。",
+    "用户2026-10-03明确要求直接发布最新版本，授权合入、打标签和公开稳定版；不自动安装到日用环境。"
   ],
   "implemented_this_batch": [
     "手机一键清空、原子备份、离线清空、旧回执与异步图片隔离",
