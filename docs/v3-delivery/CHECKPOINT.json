@@ -2,11 +2,11 @@
   "schema_version": 1,
   "product_goal": "Pocket Composer 0.5.8 稳定版发布：同步修复、凭据清理提示和统一入口",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "release/0.5.8；用户已明确授权直接发布最新版本；0.5.7 发布构建取消，标签保留",
+  "working_tree": "发布后文档记录；正式构建固定为 v0.5.8 / c219cadb4dfed68c16177e0678ad02b6b114f7ce",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
-  "last_completed_slice": "RELEASE_0_5_8_REVIEW_FOLLOWUPS",
+  "last_completed_slice": "RELEASE_0_5_8_PUBLISHED_VERIFIED",
   "active_slice": null,
-  "next_action": "本提交通过回归后合入主分支、打 v0.5.8 标签；校验正式渠道构建与资产后公开设为 latest，再验证无登录下载和更新发现。",
+  "next_action": "0.5.8 已公开为 latest，发布流程完成；按实际使用反馈迭代。实体手机输入法、多屏及日用目标应用仍未声称用户验收。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -60,8 +60,8 @@
     "real_devices_reviewed": false,
     "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9"
   },
-  "published": false,
-  "task_complete": false,
+  "published": true,
+  "task_complete": true,
   "integration_20260922": {
     "branch": "v3/integrated-preview-20260922",
     "base": "b32d2d536937d0fcad2c0e2ea76742d60fa47c42",
@@ -753,7 +753,14 @@
     "document": "docs/v3-delivery/LIVE_SYNC_REVIEW_20261003.md",
     "slow_storage_first_update_s": 0.332,
     "hud_burst_renders": 1,
-    "status": "SOURCE_PASSED_PACKAGE_PENDING",
+    "status": "RELEASED_IN_VERIFIED_0_5_8",
     "gui_panel_refresh_ms": 0.1
+  },
+  "release_0_5_8": {
+    "source_sha": "c219cadb4dfed68c16177e0678ad02b6b114f7ce",
+    "human_acceptance_claimed": false,
+    "status": "PUBLISHED_VERIFIED",
+    "url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.8",
+    "record": "docs/v3-delivery/RELEASE_0_5_8.json"
   }
 }

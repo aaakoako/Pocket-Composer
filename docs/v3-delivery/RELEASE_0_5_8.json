@@ -1,0 +1,90 @@
+{
+  "version": "0.5.8",
+  "status": "PUBLISHED_VERIFIED",
+  "source_sha": "c219cadb4dfed68c16177e0678ad02b6b114f7ce",
+  "release_url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.8",
+  "workflow": "https://github.com/aaakoako/Pocket-Composer/actions/runs/37128866673",
+  "ci": {
+    "windows": {
+      "tests": 834,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 833
+    },
+    "linux": {
+      "tests": 834,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 12,
+      "passed": 822
+    }
+  },
+  "native_reports": [
+    "startup",
+    "text",
+    "phone-primary",
+    "browser",
+    "installer",
+    "legacy-upgrade",
+    "upgrade-failures"
+  ],
+  "browser_cases": 14,
+  "assets": [
+    {
+      "name": "DoubaoTypeless.exe",
+      "bytes": 40571900,
+      "sha256": "32ae67a84825b311e32b69e76504c43bd138a2f5c0ce1e3d94bcf118d5cd1601",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.8_win_x64_files.json",
+      "bytes": 55021,
+      "sha256": "991b50c9921baacd0d488eaa5f987fbc4e7706c368ab044d3a745ba255c5098e",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.8_win_x64_portable.zip",
+      "bytes": 57037674,
+      "sha256": "abbb14fef5052147bbd321e55c44eccac8770578e5d74635497d6f5d4cca44ed",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.8_win_x64_Setup.exe",
+      "bytes": 40571900,
+      "sha256": "32ae67a84825b311e32b69e76504c43bd138a2f5c0ce1e3d94bcf118d5cd1601",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 301,
+      "sha256": "ebc3f6675e8e9fb1210a5fcb08d818a53ca7cfc03f21774442bd2696845f46fc",
+      "public_download_verified": true
+    }
+  ],
+  "update_discovery": [
+    {
+      "current": "0.5.6",
+      "channel": "stable",
+      "update_available": true
+    },
+    {
+      "current": "0.5.7",
+      "channel": "release-candidate",
+      "update_available": true
+    },
+    {
+      "current": "0.5.8",
+      "channel": "release-candidate",
+      "update_available": true
+    },
+    {
+      "current": "0.5.8",
+      "channel": "stable",
+      "update_available": false
+    }
+  ],
+  "physical_phone_tested": false,
+  "daily_codex_cursor_tested": false,
+  "installed_on_user_machine": false
+}
