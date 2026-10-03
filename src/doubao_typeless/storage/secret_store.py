@@ -2,12 +2,25 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import sys
 from pathlib import Path
 
 SERVICE = "DoubaoTypelessV3Preview"
 _MEMORY: dict[str, str] = {}
+CLEANUP_WARNING = "系统凭据已保存，但旧明文密钥文件未能删除；请检查 secrets 目录权限后重新保存。"
+
+
+def _finish_os_write(data_dir: Path, name: str) -> str:
+    # 系统写入已成功：清理失败不能伪装成凭据库失败或内存回退。
+    _MEMORY.pop(_target(data_dir, name), None)
+    try:
+        _file_path(data_dir, name).unlink(missing_ok=True)
+    except OSError:
+        logging.getLogger(__name__).warning(CLEANUP_WARNING)
+        return "os_cleanup_pending"
+    return "os"
 
 
 def _native_keyring():
@@ -49,14 +62,10 @@ def put_secret(data_dir: Path, name: str, value: str) -> str:
                 },
                 0,
             )
-            path = _file_path(data_dir, name)
-            if path.is_file():
-                path.unlink()
-            _MEMORY.pop(_target(data_dir, name), None)
-            return "os"
         except Exception:
             _MEMORY[_target(data_dir, name)] = value
             return "memory"
+        return _finish_os_write(data_dir, name)
     if os.environ.get("DT_V3_SECRET_FILE") == "1":
         path = _file_path(data_dir, name)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,14 +74,10 @@ def put_secret(data_dir: Path, name: str, value: str) -> str:
     if sys.platform != 'win32':
         try:
             _native_keyring().set_password(SERVICE, _target(data_dir, name), value)
-            # 与 Windows 一致：系统凭据库已保存后，删除先前显式文件模式留下的明文。
-            path = _file_path(data_dir, name)
-            if path.is_file():
-                path.unlink()
-            _MEMORY.pop(_target(data_dir, name), None)
-            return 'os'
         except Exception:
             pass
+        else:
+            return _finish_os_write(data_dir, name)
     _MEMORY[_target(data_dir, name)] = value
     return "memory"
 

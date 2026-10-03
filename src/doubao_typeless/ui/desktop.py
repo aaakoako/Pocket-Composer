@@ -1293,7 +1293,7 @@ class ClientWindow:
             "device_nicknames": nicks,
             **self.jev_settings.values(),
         }
-        save_settings(self.app.data_dir, payload)
+        secret_warnings = save_settings(self.app.data_dir, payload) or []
         save_vocab(self.app.data_dir, self.vocab.toPlainText())
         stored = load_settings(self.app.data_dir)
         self.app.input_check.configure(stored)
@@ -1322,6 +1322,11 @@ class ClientWindow:
         else:
             self.byok_status.setText("设置已保存")
             self.byok_status.setObjectName("muted")
+        if secret_warnings:
+            warning = " ".join(secret_warnings)
+            self.byok_status.setText(self.byok_status.text() + "。" + warning)
+            self.byok_status.setObjectName("error")
+            self.jev_settings.status.setText(warning)
 
     def probe_byok(self) -> None:
         from doubao_typeless.services.byok import ByokService, ERROR_LABELS

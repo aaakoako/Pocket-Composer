@@ -1,8 +1,45 @@
 """真实凭据库写入格式与读取解码；使用隔离临时命名，不读取用户凭据。"""
 from types import ModuleType, SimpleNamespace
+from pathlib import Path
 import sys
 import pytest
 from doubao_typeless.storage import secret_store as secrets
+
+
+@pytest.mark.parametrize('platform', ['win32', 'linux', 'darwin'])
+def test_cleanup_failure_is_reported_separately_and_retry_removes_file(tmp_path, monkeypatch, caplog, cred, platform):
+    values = {}
+    monkeypatch.setattr(secrets, 'sys', SimpleNamespace(platform=platform))
+    monkeypatch.setattr(secrets, '_native_keyring', lambda: SimpleNamespace(
+        set_password=lambda service, key, value: values.__setitem__(key, value),
+        get_password=lambda service, key: values.get(key, '')))
+    path = tmp_path/'secrets'/'byok_api_key.txt'
+    path.parent.mkdir();path.write_text('old-fixture-key')
+    original = Path.unlink
+    def fail_owned_file(self, *args, **kwargs):
+        if self == path:raise PermissionError('simulated cleanup failure')
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', fail_owned_file)
+    assert secrets.put_secret(tmp_path, 'byok_api_key', 'new-fixture-key') == 'os_cleanup_pending'
+    assert secrets._target(tmp_path, 'byok_api_key') not in secrets._MEMORY
+    assert secrets.get_secret(tmp_path, 'byok_api_key') == 'new-fixture-key'
+    assert path.read_text() == 'old-fixture-key'
+    assert secrets.CLEANUP_WARNING in caplog.text
+    assert 'old-fixture-key' not in caplog.text and 'new-fixture-key' not in caplog.text
+    monkeypatch.setattr(Path, 'unlink', original)
+    assert secrets.put_secret(tmp_path, 'byok_api_key', 'new-fixture-key') == 'os'
+    assert not path.exists()
+
+
+def test_settings_report_pending_cleanup_without_serializing_keys(tmp_path, monkeypatch):
+    import json
+    from doubao_typeless.storage import settings_store as settings
+    monkeypatch.setattr(settings, 'get_secret', lambda *args: '')
+    monkeypatch.setattr(settings, 'put_secret', lambda directory, name, value: 'os_cleanup_pending' if value else 'cleared')
+    result = settings.save_settings(tmp_path, {'jev_api_key': 'fixture-only-key'})
+    assert result == [secrets.CLEANUP_WARNING]
+    raw = settings.settings_path(tmp_path).read_text(encoding='utf-8')
+    assert 'fixture-only-key' not in raw and json.loads(raw)['jev_api_key'] == ''
 
 
 @pytest.fixture

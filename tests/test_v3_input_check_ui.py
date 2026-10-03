@@ -12,6 +12,17 @@ from doubao_typeless.storage.settings_store import load_settings
 from doubao_typeless.ui.desktop import apply_ui_font
 
 
+def test_settings_show_plaintext_cleanup_warning_without_a_modal(pair, monkeypatch):
+    from doubao_typeless.storage.secret_store import CLEANUP_WARNING
+    from doubao_typeless.ui import desktop
+    _, window, _ = pair
+    monkeypatch.setattr(desktop, 'save_settings', lambda *args, **kwargs: [CLEANUP_WARNING])
+    window.save_settings()
+    assert CLEANUP_WARNING in window.byok_status.text()
+    assert window.jev_settings.status.text() == CLEANUP_WARNING
+    assert window.byok_status.objectName() == 'error'
+
+
 @pytest.fixture(autouse=True)
 def production_font(pair,monkeypatch):
     # Exercise real settings/widgets without registering OS-wide hotkeys.
