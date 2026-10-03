@@ -11,8 +11,10 @@ state.text='B';q.offer(buildPrimaryUpdate(state,'m2'));state.text='C';q.offer(bu
 assert.equal(calls.length,1);assert.equal(q.latest.text,'C');
 assert.equal(q.acknowledge({...calls[0],update_id:'wrong',durable:true}),false);
 [...jobs.values()][0]();assert.equal(calls.length,2);assert.deepEqual(calls[0],calls[1]);
-q.acknowledge({...calls[0],durable:true});await tick();assert.equal(calls.length,3);assert.equal(calls[2].text,'C');
-q.acknowledge({...calls[2],durable:true});await q.flush('m3');
+// 等待 ACK 期间已落盘的 B 先发出（流水线），随后合并到最新的 C。
+q.acknowledge({...calls[0],durable:true});await tick();assert.equal(calls.length,3);assert.equal(calls[2].text,'B');
+q.acknowledge({...calls[2],durable:true});await tick();assert.equal(calls.length,4);assert.equal(calls[3].text,'C');
+q.acknowledge({...calls[3],durable:true});await q.flush('m3');
 q.disconnect();state.text='离线';q.offer(buildPrimaryUpdate(state,'m4'));q.connect();await tick();assert.equal(calls.at(-1).text,'离线');q.close();
 const s=draft();s.revision=3;
 const receipt={phone_primary:true,rotated:true,generation:0,archived:{draft_id:'d',epoch:'e',revision:3,source_text:'A',asset_refs:[],assets:[]}};

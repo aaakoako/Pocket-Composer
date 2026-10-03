@@ -65,6 +65,10 @@ def put_secret(data_dir: Path, name: str, value: str) -> str:
     if sys.platform != 'win32':
         try:
             _native_keyring().set_password(SERVICE, _target(data_dir, name), value)
+            # 与 Windows 一致：系统凭据库已保存后，删除先前显式文件模式留下的明文。
+            path = _file_path(data_dir, name)
+            if path.is_file():
+                path.unlink()
             _MEMORY.pop(_target(data_dir, name), None)
             return 'os'
         except Exception:

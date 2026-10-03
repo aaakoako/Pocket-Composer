@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "product_goal": "Pocket Composer 0.5.6 手机记住配对与自动续接修复候选 + Opus 5.5 发布前审查修复",
+  "product_goal": "Pocket Composer 0.5.7 候选：手机连续输入时电脑实时跟随 + PR12 审查修复",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "0.5.6 发布准备；产品候选42dddc3远端完整构建通过，当前仅整理发布文档；用户已授权合入master并正式发布",
+  "working_tree": "fix/live-sync-and-review-20261003；Opus 修复与 Codex 独立源码验收完成，等待确切提交的候选构建",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
-  "last_completed_slice": "OPUS55_REVIEW_FIXES",
+  "last_completed_slice": "LIVE_SYNC_0_5_7_INDEPENDENT_REVIEW",
   "active_slice": null,
-  "next_action": "合入master并将v0.5.6绑定到合并提交；正式渠道重建，验证包内来源/文件摘要及原生证据后公开Release；实机手机与Codex/Cursor验收仍未完成",
+  "next_action": "提交隔离分支并运行 Release workflow_dispatch；核对 Windows/Linux 回归、安装升级与原生输入证据，下载校验候选包。暂不合并、打标签或发布稳定版。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -716,5 +716,43 @@
     "independent": "27 passed",
     "frozen_windows": "startup/native text/phone-primary/browser14/installer/legacy0.4.2/failure recovery passed",
     "real_user_acceptance": false
+  },
+  "live_sync_0_5_7": {
+    "root_causes": [
+      "手机 DraftRepository.flush 等待整个写盘队列清空，持续输入使发件箱 persist 饥饿（慢存储模拟下浮窗落后 2–9 秒）",
+      "每次按键把图片 data URL/画布场景整份重写进 IndexedDB",
+      "发件固定 100ms 防抖；长稿术语查询把全文放进 URL 导致 400",
+      "电脑审阅窗每次更新 setPlainText 跳回顶部；活动刷新每句排队并读设置文件；带图时每句重新解码图片",
+      "快速输入时本地 ACK 只需几毫秒，发件箱每份都发，超过电脑连接限速（40 条/2 秒）；限速错误被当成冲突，同步永久停止",
+      "浮窗有选区时整段冻结；Qt 位置按 UTF-16 而代码按码点换算，emoji 后选区错位",
+      "手机更新写盘期间持有状态锁，界面定时检查/面板刷新读身份时等待写盘",
+      "Blob 仅按大小+类型比较；上传残留清理会删除 uploads 下非本服务的目录",
+      "payload 引用记录仍写在版本 1 数据库中，已打开的 0.5.6 页面可把引用当图片/场景读出"
+    ],
+    "probe": "tools/v3_live_sync_probe.py（无头 Chromium + offscreen Qt，平台替身见脚本说明）",
+    "evidence_dir": "G:/AgentStorage/Deliveries/PocketComposer-LiveSync-20261003/segment-03",
+    "not_verified": [
+      "真实 iOS/Android 输入法与存储时延",
+      "真实网络/Wi-Fi 切换",
+      "原生插入与真实 Codex/Cursor 目标",
+      "冻结 EXE/安装包"
+    ],
+    "round2": {
+      "send_rate": "DraftOutbox minIntervalMs=100（空闲后第一份立即发），rate limited 退回待发 1s 后重发，不再当冲突",
+      "hud_selection": "ui/live_text.py：公共前缀之后替换尾部，UTF-16 位置；改动触及选区时暂缓并在按钮提示「新内容已到」",
+      "gui_lock": "input_check_identity(wait=False) 读最近完整发布的身份；apply_phone_update 结束时发布",
+      "idb_version": 2,
+      "upload_cleanup": "只处理 32 位 hex 目录且仅含本服务文件；链接/联接不跟随；无清单旧残留按目录时间过期删除",
+      "evidence_dir": "G:/AgentStorage/Deliveries/PocketComposer-LiveSync-20261003/segment-04"
+    }
+  },
+  "live_sync_independent_review": {
+    "physical_phone_tested": false,
+    "independent_tests_passed": 27,
+    "document": "docs/v3-delivery/LIVE_SYNC_REVIEW_20261003.md",
+    "slow_storage_first_update_s": 0.332,
+    "hud_burst_renders": 1,
+    "status": "SOURCE_PASSED_PACKAGE_PENDING",
+    "gui_panel_refresh_ms": 0.1
   }
 }

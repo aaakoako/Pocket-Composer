@@ -156,7 +156,7 @@ def test_unrecognised_current_record_is_preserved_before_claim(storage_page):
           tx.oncomplete=()=>{r.result.close();ok()};tx.onerror=bad}});
       const a=new DTStore.DraftRepository(()=>{},()=>{},"tab-a");
       const saved=await a.claim();
-      const keys=await new Promise(ok=>{const r=indexedDB.open("doubao-typeless-v3-drafts",1);
+      const keys=await new Promise(ok=>{const r=indexedDB.open("doubao-typeless-v3-drafts");
         r.onsuccess=()=>{const q=r.result.transaction("drafts").objectStore("drafts").getAllKeys();
           q.onsuccess=()=>{r.result.close();ok(q.result)}}});
       return {saved,unreadable:keys.filter(k=>String(k).startsWith("unreadable-")).length};

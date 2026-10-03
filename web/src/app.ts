@@ -367,12 +367,15 @@ export function boot(root: HTMLElement): void {
     const editing = editorOpen();
     // 之前的写入还在途或已失败时，内存内容同样可能没有落盘，也要保全。
     const unsettled = repository.unsettled;
+    // 在线时由发件箱负责落盘、不再排定时写入：还没写进主稿的最新内容也算未落盘，必须另存。
+    const lastWritten = repository.lastWritten;
+    const dirty = lastWritten ? !sameContent(draftSnapshot(), lastWritten) : !!(state.text || state.assets.length);
     if (editing) {
       saveOpenEditor();
       ++editorSequence; editorAbort?.abort(); editor?.destroy(); editor = null; editorLoading = false;
       $("editor").classList.remove("show"); $("composer").style.display = "flex"; $("mobileHead").style.display = "flex";
     }
-    if (pending || editing || unsettled) {
+    if (pending || editing || unsettled || dirty) {
       // 主稿已归另一页面：受保护写入会被拒，不同的内容在同一事务里另存为 side-superseded，主稿不动。
       inactiveKept = structuredClone(draftSnapshot());
       repository.save(inactiveKept);
@@ -499,7 +502,8 @@ export function boot(root: HTMLElement): void {
     state.removed = state.removed.filter(item => item.epoch === state.epoch);
     $("removeNotice").hidden = !state.removed.length;
     $("removeMessage").textContent = state.removed.length ? `已移除${state.removed[state.removed.length-1].asset.kind}` : "";
-    const signature = JSON.stringify(state.assets.map(a => [a.id,a.asset_id,a.status,a.render_revision,a.preview,a.progress]));
+    // 预览是几 MB 的 data URL：只取长度与尾部做签名，避免每个字都序列化整张图。
+    const signature = JSON.stringify(state.assets.map(a => [a.id,a.asset_id,a.status,a.render_revision,a.preview.length,a.preview.slice(-48),a.progress]));
     if (signature === attachmentsSignature) return;
     attachmentsSignature = signature;
     const strip = $("attachments");
@@ -674,6 +678,8 @@ export function boot(root: HTMLElement): void {
       }
       if (msg.type === "recall.ready") toast(msg.text_unchanged ? "已召回上次待插入，当前草稿未改" : "召回异常");
       if (msg.type === "error") {
+        // 草稿快照被连接限速拒收：退回待发稍后重发，稿仍在手机，不是冲突，也不打扰用户。
+        if (msg.error === "rate limited" && outbox.defer(msg)) return;
         const relevant = !activeSend || (!!activeSend.intentId && msg.intent_id === activeSend.intentId);
         finishFeedback(msg);
         update();
@@ -860,7 +866,9 @@ export function boot(root: HTMLElement): void {
   let syncState = "offline";
   let lastPong = Date.now();
   let receiptChain: Promise<void> = Promise.resolve();
-  const outbox = new DraftOutbox({debounceMs:100,
+  // 只合并同一帧内的输入；一次只有一个在途快照，持续说话时自然合并。
+  // 连续快速输入时每 100 ms 最多发一份（约为电脑连接限速的一半），最后一份总会发出。
+  const outbox = new DraftOutbox({debounceMs:16, minIntervalMs:100,
     send: (message: any) => {
       if (!ws || ws.readyState !== WebSocket.OPEN || !sessionReady || ws.bufferedAmount > 128*1024)
         throw new Error("BACKPRESSURE");
@@ -875,23 +883,40 @@ export function boot(root: HTMLElement): void {
       renderSyncState();
     },
   });
+  // 连续说话时 ACK 很快，状态会在“同步中/已收到”间每句来回跳；短暂未确认显示稳定的“实时同步中”，
+  // 真正超过 1.5 秒没收到电脑确认才明确提示落后，不用动画掩盖不同步。
+  let lastSyncedAt = 0, unsyncedSince = 0, lagTimer = 0;
   function renderSyncState() {
     $("transferStatus").dataset.transport = syncState;
     let status = syncState;
+    const now = Date.now();
+    if (status === "synced") {lastSyncedAt = now; unsyncedSince = 0;}
+    else if (status === "syncing" || status === "retrying") {if (!unsyncedSince) unsyncedSince = now;}
+    else unsyncedSince = 0;
+    const waited = unsyncedSince ? now - unsyncedSince : 0;
+    if (status === "syncing" && unsyncedSince) {
+      if (waited >= 1500) status = "lagging";
+      else if (now - lastSyncedAt < 3000) status = "live";
+    }
+    if (unsyncedSince && !lagTimer) lagTimer = window.setInterval(() => {
+      if (!unsyncedSince) {window.clearInterval(lagTimer); lagTimer = 0;}
+      renderSyncState();
+    }, 500);
     if (status === 'synced') {
       if (state.assets.some(a => a.status === 'failed')) status = 'asset_failed';
       else if (state.assets.some(a => a.pending_png && a.status !== 'ready')) status = 'uploading';
       else if (state.assets.some(a => !a.asset_id || a.status === 'editing')) status = 'editing';
     }
     const labels: Record<string,string> = {uploading:"图片仍在传输，电脑尚未收到全部图文",asset_failed:"图片上传失败，原稿保留，可重试",editing:"图片尚未保存到本次图文",offline:"手机已保留 · 连接恢复后继续同步",synced:"电脑已收到当前版本 · 不自动发送",
-      syncing:"正在同步最新图文…",retrying:"网络较慢，正在补发当前稿…",conflict:"同步暂停，手机稿保留；请勿同时打开两个编辑页",save_failed:"手机存储暂不可写，内容留在页面中"};
+      syncing:"正在同步最新图文…",retrying:"网络较慢，正在补发当前稿…",live:"电脑正在跟随手机最新内容",
+      lagging:`电脑已 ${Math.round(waited/1000)} 秒没确认最新内容；稿件保存在手机，正在继续同步`,conflict:"同步暂停，手机稿保留；请勿同时打开两个编辑页",save_failed:"手机存储暂不可写，内容留在页面中"};
     const shortLabels: Record<string,string> = {uploading:"图片传输中",asset_failed:"图片待重试",editing:"图片待保存",offline:"离线 · 稿件保留",synced:"电脑已收到当前版本",
-      syncing:"同步中",retrying:"正在补发",conflict:"草稿有分歧",save_failed:"本地保存失败"};
+      syncing:"同步中",retrying:"正在补发",live:"实时同步中",lagging:`电脑还没收到最新 ${Math.round(waited/1000)} 秒 · 稿在手机`,conflict:"草稿有分歧",save_failed:"本地保存失败"};
     $("transferStatus").textContent = shortLabels[status] || status;
     $("transferStatus").title = labels[status] || status;
     $("transferStatus").setAttribute('aria-label',labels[status] || status);
     $("syncMap").dataset.state = status;
-    $("transferStatus").dataset.busy = String(['syncing','retrying','uploading'].includes(status));
+    $("transferStatus").dataset.busy = String(['syncing','retrying','uploading','lagging'].includes(status));
   }
   function currentMessage() {
     if (!latestMessage || latestMessage.epoch !== state.epoch || latestMessage.revision !== state.revision)
@@ -910,8 +935,9 @@ export function boot(root: HTMLElement): void {
     $("deliveryStatus").hidden = true; $("deliveryStatus").textContent = "";
     $("sync").textContent = "图在前，文字在后 · 不自动发送";
     latestMessage = buildPrimaryUpdate(state, newId());
-    persistDraft();
     if (restored) publishCurrent();
+    // 在线时发件箱发出前必先落盘这一版；再排一次定时写盘只会与它争抢同一写入队列。
+    if (!(outbox.online && !outbox.failure && sessionReady)) persistDraft();
   }
   async function handleReceiptNow(msg: any) {
     if (!msg.phone_primary) return;
@@ -1036,7 +1062,8 @@ export function boot(root: HTMLElement): void {
   });
   async function refreshTerms() {
     if (!state.session || !state.online || !state.text.trim() || syncState !== "synced") return;
-    const res = await fetch("/v3/terms?q=" + encodeURIComponent(state.text), { headers: headers() });
+    // 只看最近一段：长稿全文放进 URL 会超过电脑端请求行上限而失败。
+    const res = await fetch("/v3/terms?q=" + encodeURIComponent(state.text.slice(-400)), { headers: headers() });
     if (!res.ok) return;
     const data = await res.json();
     if (data.hints && data.hints.length) toast(String(data.hints[0].hint));

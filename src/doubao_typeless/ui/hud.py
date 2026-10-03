@@ -75,6 +75,8 @@ class HudController:
         self._content_serial = 0
         self._operation_content_serial = 0
         self._dispatch = None
+        # 跨线程内容更新只排一个：渲染时读取最新内容，连续说话不会在 Qt 队列里积压旧版本。
+        self._show_pending = False
         self._foreground_surfaces = set()
         self._updating = False
         self._follow_tail = True
@@ -283,6 +285,7 @@ class HudController:
             def receive(inner, message):
                 kind, payload = message
                 if kind == "show":
+                    controller._show_pending = False
                     controller._apply_content_update()
                 elif kind == "hide":
                     controller._apply_hide()
@@ -326,6 +329,13 @@ class HudController:
         from PySide6.QtCore import QThread
         if QThread.currentThread() != self._widget.thread():
             if self._dispatch is not None:
+                if kind == "show":
+                    if self._show_pending:
+                        return
+                    self._show_pending = True
+                else:
+                    # 隐藏/操作状态必须保持与内容更新的先后顺序：之后的内容更新重新排队。
+                    self._show_pending = False
                 self._dispatch.called.emit((kind, payload))
             else:
                 # 支持既有嵌入式HUD：外部提供widget、尚未创建专用接收器。
@@ -723,8 +733,16 @@ class HudController:
         body = self.text if self.text else ("图片准备中，可继续在手机写说明" if unfinished else "")
         # 程序主动写字造成的滚动条变化，不能被误判成用户正在读前文。
         reading = not self._follow_tail or self._reading()
-        if self._body.textCursor().hasSelection() or self._body.verticalScrollBar().isSliderDown():
+        from doubao_typeless.ui.live_text import change_start, clamp_position, replace_tail
+        previous = self._body.toPlainText()
+        current = self._body.textCursor()
+        # 选区之后的追加/修改照常显示（只改尾部，选区和阅读位置不动）；拖动滚动条时，
+        # 或新内容会改到选中的文字时，暂不改正文，按钮提示有新内容，点「回到最新」再看。
+        overlaps = (current.hasSelection() and body != previous
+                    and change_start(previous, body) < current.selectionEnd())
+        if overlaps or self._body.verticalScrollBar().isSliderDown():
             self._follow_tail = False
+            self._latest.setText("新内容已到 ↓" if body != previous else "回到最新 ↓")
             self._latest.show()
             # Reading freezes content/scroll, not visibility. A selected HUD
             # hidden by expanded review must still return after locating a field.
@@ -735,22 +753,18 @@ class HudController:
             bar.setValue(position)
             self._pause_or_resume_idle()
             return
+        self._latest.setText("回到最新 ↓")
+        if current.hasSelection():
+            self._follow_tail = False
         self._updating = True
-        old_cursor = self._body.textCursor()
+        old_cursor = current
         position, anchor = old_cursor.position(), old_cursor.anchor()
         scroll = self._body.verticalScrollBar()
         scroll_pos = scroll.value()
         self._body.blockSignals(True)
         scroll.blockSignals(True)
-        previous = self._body.toPlainText()
         if body != previous:
-            if body.startswith(previous):
-                from PySide6.QtGui import QTextCursor
-                edit = QTextCursor(self._body.document())
-                edit.movePosition(QTextCursor.End)
-                edit.insertText(body[len(previous):])
-            else:
-                self._body.setPlainText(body)
+            replace_tail(self._body.document(), previous, body)
         chrome = self._chrome_height()
         max_h = self._max_height()
         doc_h = self._text_height(body)
@@ -769,10 +783,11 @@ class HudController:
         from PySide6.QtGui import QTextCursor
         cursor = self._body.textCursor()
         if reading:
-            cursor.setPosition(min(anchor, len(body)))
-            cursor.setPosition(min(position, len(body)), QTextCursor.KeepAnchor)
+            document = self._body.document()
+            cursor.setPosition(clamp_position(document, anchor))
+            cursor.setPosition(clamp_position(document, position), QTextCursor.KeepAnchor)
             self._body.setTextCursor(cursor)
-            scroll.setValue(scroll_pos)
+            scroll.setValue(min(scroll_pos, scroll.maximum()))
         else:
             cursor.movePosition(QTextCursor.End)
             self._body.setTextCursor(cursor)
