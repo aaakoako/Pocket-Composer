@@ -2,7 +2,7 @@
 
 > The repository is now [Pocket-Composer](https://github.com/aaakoako/Pocket-Composer). Older in-app updaters are no longer maintained; download and install manually from the new repository. Existing data directories are unchanged.
 
-**Current Windows stable: 0.5.6** ([release notes](0.5.6-reconnect.md)). **0.5.7 is an unreleased candidate** ([candidate notes](0.5.7-live-sync.md)) that improves how quickly the desktop follows continuous phone dictation. Download names keep the legacy `DoubaoTypeless_<version>_win_x64_Setup.exe` identifier for updater compatibility.
+**Current Windows stable: 0.5.7** ([release notes](0.5.7-live-sync.md)). This release improves how quickly the desktop follows continuous phone dictation. Download names keep the legacy `DoubaoTypeless_<version>_win_x64_Setup.exe` identifier for updater compatibility.
 
 1. Download from [GitHub Releases](https://github.com/aaakoako/Pocket-Composer/releases). Use the stable release for normal use; preview releases are labeled separately.
 2. Run the Windows per-user **Setup.exe**, or extract the **entire portable ZIP** before opening DoubaoTypeless.exe. Do not copy just the executable out of its folder.

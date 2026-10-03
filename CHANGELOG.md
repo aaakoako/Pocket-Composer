@@ -1,12 +1,12 @@
 # 更新记录 / Changelog
 
-## 0.5.7 Candidate
+## 0.5.7 Stable
 
-[中文 / English candidate notes](docs/release/0.5.7-live-sync.md)
+[中文 / English release notes](docs/release/0.5.7-live-sync.md)
 
-手机连续说话时电脑浮窗实时跟随：本地保存不再被持续输入拖住，带图时不再每个字重写图片；快速输入按间隔合并发送不触发限速；浮窗选中文字时仍显示新内容；电脑写盘不卡界面；新旧手机页面共存不误读；状态如实显示；修复 PR12 审查中的标签接管比较、上传续传、Linux 终端角色与密钥明文残留。
+手机连续说话时电脑浮窗实时跟随：本地保存不再被持续输入拖住，带图时不再每个字重写图片；快速输入按间隔合并发送不触发限速；浮窗选中文字时仍显示新内容；电脑写盘不阻塞定时刷新；新旧手机页面共存不误读；状态如实显示；修复 PR12 审查中的标签接管比较、上传续传、Linux 终端角色与密钥明文残留。
 
-Live desktop following during continuous dictation: local saves no longer starve sending, images are not rewritten per keystroke, rate-safe coalesced sending for fast typing, live overlay updates around a selection, no UI stalls on slow desktop saves, safe mixed-version phone storage, honest sync status, and fixes from the PR12 review (tab takeover comparison, resumable uploads after restart, Linux terminal roles, plaintext cleanup).
+Live desktop following during continuous dictation: local saves no longer starve sending, images are not rewritten per keystroke, rate-safe coalesced sending for fast typing, live overlay updates around a selection, non-blocking periodic UI reads during desktop saves, safe mixed-version phone storage, honest sync status, and fixes from the PR12 review (tab takeover comparison, resumable uploads after restart, Linux terminal roles, plaintext cleanup).
 
 ## 0.5.6 Stable
 
