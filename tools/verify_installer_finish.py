@@ -118,7 +118,16 @@ def verify(directory, report):
             assert quit_app()
             def exited():
                 log = data / 'logs/runtime.log'
-                return log.exists() and '"event": "process_exit"' in log.read_text(encoding='utf-8')
+                if not log.exists():
+                    return False
+                for line in log.read_text(encoding='utf-8').splitlines():
+                    try:
+                        event = json.loads(line[line.index('{'):])
+                    except (ValueError, TypeError):
+                        continue
+                    if event.get('event') == 'process_exit' and event.get('exit_code') == 0:
+                        return True
+                return False
             wait_for(exited, 20)
             subprocess.run([str(install / 'Uninstall.exe'), '/S', f'_?={install}'], check=True, timeout=60)
             assert not any(link.exists() for link in links)

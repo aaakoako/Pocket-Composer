@@ -959,7 +959,8 @@ class ClientWindow:
             self.widget,
             "帮助与诊断",
             f"{preview_version_label()}\n\n"
-            "连接：手机与电脑连同一网络，扫描当前窗口的二维码。\n"
+            "连接：手机与电脑连同一网络，扫描当前窗口的二维码；多个网卡可在连接页切换。\n"
+            "Tailscale：优先使用局域网地址；选择 Tailscale 地址时，手机也需要接入同一虚拟网络。\n"
             "插入：在连接页允许手机插入，点一下目标输入框，再操作手机或浮窗。\n"
             "失败：文字已复制时可手动粘贴；图片结果待确认时点浮窗「恢复」。\n"
             "浮窗：拖动顶部可移动；展开后可返回；关闭设置仍在托盘运行。\n"
@@ -1010,7 +1011,7 @@ class ClientWindow:
         from doubao_typeless.ui.single_instance import pipe_name
         package = getattr(self, '_update_package', None)
         if not package or getattr(self, '_updating', False):return
-        if QMessageBox.question(self.widget, '更新 Pocket Composer',
+        if QMessageBox.question(self.update_dialog, '更新 Pocket Composer',
                 f"下载并更新到 {package['version']}？下载完成后程序会正常退出并自动重启。\n"
                 "当前工作区会保留；不会自动迁移旧框架的数据。") != QMessageBox.Yes:
             return

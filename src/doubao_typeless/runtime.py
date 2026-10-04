@@ -88,8 +88,10 @@ def connection_addresses() -> list[tuple[str, str]]:
                 continue
             local = any(address in network for network in private)
             vpn = virtual or address in overlay
-            rank = 0 if physical and local else 1 if physical and not vpn else 2 if local and not vpn else 3
-            label = f'{name} · {address}' + ('（需手机接入同一 VPN）' if vpn else '')
+            rank = (0 if physical and local else 1 if physical and not vpn else
+                    2 if local and not vpn else 3 if local else 4)
+            hint = '（需手机接入同一 VPN）' if address in overlay or 'tailscale' in name.lower() else '（虚拟网络，需确认手机可达）'
+            label = f'{name} · {address}' + (hint if vpn else '')
             ranked.append((rank, interface.index(), str(address), label))
     seen = set()
     result = []
