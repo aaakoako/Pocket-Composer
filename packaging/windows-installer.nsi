@@ -31,9 +31,11 @@ Var NewStarted
 !ifdef TEST_INSTALL
   !define PRODUCT "DoubaoTypeless Installer Test"
   !define REGKEY "Software\DoubaoTypelessInstallerTest"
+  !define SHORTCUT "DoubaoTypeless Installer Test"
 !else
   !define PRODUCT "DoubaoTypeless"
   !define REGKEY "Software\DoubaoTypeless"
+  !define SHORTCUT "Pocket Composer"
 !endif
 Name "${PRODUCT} ${VERSION}"
 OutFile "${OUTPUT}"
@@ -49,7 +51,9 @@ VIAddVersionKey "LegalCopyright" "DoubaoTypeless contributors"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_TEXT "安装完成。请关闭正在运行的旧版本，再从开始菜单打开 DoubaoTypeless。设置、草稿和图片保存在应用目录之外，升级和卸载不会删除它们。"
+!define MUI_FINISHPAGE_TEXT "安装完成，已创建桌面和开始菜单快捷方式。点击完成即可打开 Pocket Composer。设置、草稿和图片保存在应用目录之外，升级和卸载不会删除它们。"
+!define MUI_FINISHPAGE_RUN "$LaunchExe"
+!define MUI_FINISHPAGE_RUN_TEXT "打开 Pocket Composer"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -210,10 +214,14 @@ Section "Application"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}" "NoRepair" 1
+  IfErrors install_failed
+  SetOutPath "$INSTDIR\versions\${BUILD_ID}"
+  CreateShortcut "$SMPROGRAMS\${SHORTCUT}.lnk" "$LaunchExe"
+  IfErrors install_failed
+  CreateShortcut "$DESKTOP\${SHORTCUT}.lnk" "$LaunchExe"
+  IfErrors install_failed
 !ifndef TEST_INSTALL
-  IfErrors install_failed
-  CreateShortcut "$SMPROGRAMS\DoubaoTypeless.lnk" "$LaunchExe"
-  IfErrors install_failed
+  Delete "$SMPROGRAMS\DoubaoTypeless.lnk"
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "DoubaoTypelessV3"
   ClearErrors
   ${If} $0 != ""
@@ -265,6 +273,8 @@ Section "Uninstall"
   ${If} $9 == "$INSTDIR"
     DeleteRegKey HKCU "${REGKEY}"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}"
+    Delete "$SMPROGRAMS\${SHORTCUT}.lnk"
+    Delete "$DESKTOP\${SHORTCUT}.lnk"
 !ifndef TEST_INSTALL
     Delete "$SMPROGRAMS\DoubaoTypeless.lnk"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "DoubaoTypelessV3"

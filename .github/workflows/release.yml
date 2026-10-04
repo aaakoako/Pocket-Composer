@@ -77,6 +77,7 @@ jobs:
       - run: python tools/package_v3_release.py dist/DoubaoTypeless --output release --compiler "${{ runner.temp }}/nsis/nsis-3.12/makensis.exe"
       - run: python tools/package_v3_release.py dist/DoubaoTypeless --output installer-test --compiler "${{ runner.temp }}/nsis/nsis-3.12/makensis.exe" --test-install
       - run: python tools/verify_v3_installer.py installer-test --payload dist/DoubaoTypeless --compiler "${{ runner.temp }}/nsis/nsis-3.12/makensis.exe" --report evidence/installer.json
+      - run: python tools/verify_installer_finish.py installer-test --report evidence/installer-finish.json
       - run: python -m pip install cryptography==46.0.7
         if: ${{ !cancelled() && hashFiles('installer-test/*_Setup.exe') != '' }}
       - name: Published 0.4.2 full upgrade and restart

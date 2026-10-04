@@ -585,6 +585,16 @@ class ClientWindow:
         self.url_label = QLabel("")
         self.url_label.setWordWrap(True)
         info.addWidget(self.url_label)
+        self._selected_address = None
+        self.address_choice = QComboBox()
+        self.address_choice.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.address_choice.setMinimumContentsLength(12)
+        self.address_choice.setToolTip('默认优先使用局域网；多个网络时选择手机能访问的网卡')
+        info.addWidget(self.address_choice)
+        self.address_choice.activated.connect(self._select_address)
+        refresh_addresses = QPushButton('刷新网络地址')
+        refresh_addresses.clicked.connect(self._refresh_addresses)
+        info.addWidget(refresh_addresses)
         self.code_label = QLabel("")
         info.addWidget(self.code_label)
         hint = QLabel("1. 手机与电脑连同一网络，扫码连接。\n2. 在下方允许手机插入或截电脑。\n3. 点一下目标输入框，再从手机或浮窗插入。")
@@ -796,10 +806,19 @@ class ClientWindow:
         self.update_cancel = QPushButton("取消下载")
         self.update_cancel.hide()
         self.update_cancel.clicked.connect(lambda: self._update_cancel.set())
-        sl.addRow(self.update_status)
-        sl.addRow(self.update_install)
-        sl.addRow(self.update_cancel)
-        sl.addRow(self.update_download)
+        from PySide6.QtWidgets import QDialog
+        self.update_dialog = QDialog(w, Qt.Window)
+        self.update_dialog.setWindowTitle('Pocket Composer 更新')
+        self.update_dialog.resize(430, 220)
+        style_root(self.update_dialog)
+        update_layout = QVBoxLayout(self.update_dialog)
+        for control in (self.update_status, self.update_install, self.update_cancel, self.update_download):
+            update_layout.addWidget(control)
+        later = QPushButton('关闭')
+        later.clicked.connect(self.update_dialog.hide)
+        update_layout.addWidget(later)
+        self._announced_update = None
+        self.app.hud.register_companion(self.update_dialog)
         save = QPushButton("保存设置")
         save.setObjectName("primary")
         save.clicked.connect(self.save_settings)
@@ -857,6 +876,14 @@ class ClientWindow:
         self.input_check_timer.setInterval(200)
         self.input_check_timer.timeout.connect(lambda: self.app.hud.set_input_check(self.app.input_check_tick()))
         self.input_check_timer.start()
+        self._refresh_addresses()
+        from doubao_typeless.build_info import release_layout
+        self.update_timer = QTimer(w)
+        self.update_timer.setInterval(6 * 60 * 60 * 1000)
+        self.update_timer.timeout.connect(lambda: self.check_update(automatic=True))
+        if release_layout():
+            self.update_timer.start()
+            QTimer.singleShot(3000, w, lambda: self.check_update(automatic=True))
         self.refresh()
 
     def _apply_provider(self, index: int) -> None:
@@ -883,13 +910,32 @@ class ClientWindow:
             self.byok_status.setText(str(exc));self.byok_url_note.setText('地址格式有误');return False
 
     def phone_url(self) -> str:
-        return f"http://{lan_ip()}:{self.app.port}/"
+        return f"http://{self._selected_address or lan_ip()}:{self.app.port}/"
+
+    def _refresh_addresses(self) -> None:
+        from doubao_typeless.runtime import connection_addresses
+        addresses = connection_addresses()
+        self.address_choice.clear()
+        self.address_choice.addItem('自动选择局域网地址', None)
+        for address, label in addresses:
+            self.address_choice.addItem(label, address)
+        index = self.address_choice.findData(self._selected_address)
+        self.address_choice.setCurrentIndex(max(0, index))
+        if index < 0:
+            self._selected_address = None
+        self.refresh()
+
+    def _select_address(self, index: int) -> None:
+        self._selected_address = self.address_choice.itemData(index)
+        self.refresh()
 
     def pairing_url(self) -> str:
         code = self.app.auth.current_pairing_challenge() or self.app.auth.new_pairing_challenge()
         return pairing_page_url(self.phone_url(), code)
 
     def _shown_pairing_url(self) -> str:
+        if self.phone_url().startswith('http://127.0.0.1:'):
+            return ''
         # 只有用户正看着连接页才新建配对挑战；后台同步/隐藏窗口不得持续产出可猜的新短码。
         code = self.app.auth.current_pairing_challenge()
         if code is None and self.widget.isVisible():
@@ -922,10 +968,15 @@ class ClientWindow:
             f"日志：{log}",
         )
 
-    def check_update(self) -> None:
+    def check_update(self, *, automatic: bool = False) -> None:
         import threading
-        from PySide6.QtCore import QTimer
+        from PySide6.QtCore import QTimer, Qt
         from doubao_typeless.services.v3_update import check_preview_update
+        if not automatic:
+            self.update_dialog.setAttribute(Qt.WA_ShowWithoutActivating, False)
+            self.update_dialog.show()
+            self.update_dialog.raise_()
+            self.update_dialog.activateWindow()
         if not self.update_button.isEnabled(): return
         self.update_button.setEnabled(False)
         self.update_status.setText("正在查询正式版本…")
@@ -943,6 +994,10 @@ class ClientWindow:
                 self.update_install.setVisible(bool(self._update_package))
                 self.update_download.show()
                 self.update_button.setEnabled(True)
+                if automatic and info.get('update_available') and info.get('latest') != self._announced_update:
+                    self._announced_update = info.get('latest')
+                    self.update_dialog.setAttribute(Qt.WA_ShowWithoutActivating, True)
+                    self.update_dialog.show()
             try: QTimer.singleShot(0, self.widget, apply)
             except RuntimeError: pass
         threading.Thread(target=work, daemon=True).start()
@@ -1138,7 +1193,8 @@ class ClientWindow:
                 self.qr.setPixmap(pix)
             elif not url:
                 self.qr.clear()
-                self.qr.setText("二维码已过期\n打开窗口自动更新")
+                self.qr.setText("未找到可用网络\n连接 Wi-Fi 或网线后刷新" if self.phone_url().startswith('http://127.0.0.1:')
+                                else "二维码已过期\n打开窗口自动更新")
         self.code_label.setText(self._pair_caption())
         sessions = self.app.auth.public_sessions()
         online = self.app.bridge.online_device_ids()
