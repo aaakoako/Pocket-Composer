@@ -1,0 +1,107 @@
+{
+  "version": "0.5.9",
+  "status": "PUBLISHED_VERIFIED",
+  "source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
+  "release_url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.9",
+  "workflow": "https://github.com/aaakoako/Pocket-Composer/actions/runs/37198960109",
+  "ci": {
+    "windows": {
+      "tests": 844,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 843
+    },
+    "linux": {
+      "tests": 844,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 12,
+      "passed": 832
+    }
+  },
+  "native_reports": [
+    "startup",
+    "text",
+    "phone-primary",
+    "browser",
+    "installer",
+    "legacy-upgrade",
+    "upgrade-failures",
+    "installer-finish"
+  ],
+  "browser_cases": 14,
+  "assets": [
+    {
+      "name": "DoubaoTypeless.exe",
+      "bytes": 40567512,
+      "sha256": "d6d4cacad7663887a141120ce45ff0c7a5a61e7a91f204c831950acb73fcf17b",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.9_win_x64_files.json",
+      "bytes": 55021,
+      "sha256": "e4e45b6c1cd929c126a3be8a3f8cf17ca919425273d1e7a1629f175776050036",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.9_win_x64_portable.zip",
+      "bytes": 57038902,
+      "sha256": "f7dc979652934180e1d9ada7a49f8a162d1205249944561bf6bf73dd2b2b630a",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.9_win_x64_Setup.exe",
+      "bytes": 40567512,
+      "sha256": "d6d4cacad7663887a141120ce45ff0c7a5a61e7a91f204c831950acb73fcf17b",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 301,
+      "sha256": "df20a8c2e5aa576406302d1ca51c88907f2815a780c0378faca56ca965cb2612",
+      "public_download_verified": true
+    }
+  ],
+  "update_discovery": [
+    {
+      "current": "0.5.6",
+      "channel": "stable",
+      "update_available": true
+    },
+    {
+      "current": "0.5.7",
+      "channel": "release-candidate",
+      "update_available": true
+    },
+    {
+      "current": "0.5.8",
+      "channel": "stable",
+      "update_available": true
+    },
+    {
+      "current": "0.5.9",
+      "channel": "release-candidate",
+      "update_available": true
+    },
+    {
+      "current": "0.5.9",
+      "channel": "stable",
+      "update_available": false
+    }
+  ],
+  "installer_finish": {
+    "passed": true,
+    "mode": "native NSIS wizard on disposable CI desktop",
+    "finish_launch_checked_by_default": true,
+    "desktop_and_start_menu_target": "versions\\0.5.9-f1632ed8\\DoubaoTypeless.exe",
+    "finish_started_current_build": true,
+    "http_ready": true,
+    "ipc_quit": true,
+    "shortcuts_removed_on_uninstall": true
+  },
+  "physical_phone_tested": false,
+  "tailscale_phone_reachability_tested": false,
+  "daily_machine_focus_tested": false,
+  "installed_on_user_machine": false
+}

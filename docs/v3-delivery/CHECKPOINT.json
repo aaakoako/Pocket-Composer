@@ -2,11 +2,11 @@
   "schema_version": 1,
   "product_goal": "Pocket Composer 0.5.9：VPN 地址选择、自动检查更新和独立窗口、安装快捷方式与完成后启动",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "fix/network-update-install-20261004；PR #15；0.5.9 候选验证中",
+  "working_tree": "发布后文档记录；正式构建固定为 v0.5.9 / f1632ed8e1df0cc8b434b8bc1619731908760221",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
-  "last_completed_slice": "RELEASE_0_5_8_PUBLISHED_VERIFIED",
-  "active_slice": "NETWORK_UPDATE_INSTALL_0_5_9",
-  "next_action": "读取候选构建 37196963710 的安装完成页、快捷方式、新版启动与既有回归结果；通过后发布修复版。实体手机跨网可达性与日用焦点行为未声称验收。",
+  "last_completed_slice": "RELEASE_0_5_9_PUBLISHED_VERIFIED",
+  "active_slice": null,
+  "next_action": "0.5.9 已公开为 latest，下载哈希与旧版更新发现已验证。按实际使用反馈继续；实体手机在 Tailscale 网络下的连通与日用焦点行为仍待实际使用验证。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
@@ -762,5 +762,11 @@
     "status": "PUBLISHED_VERIFIED",
     "url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.8",
     "record": "docs/v3-delivery/RELEASE_0_5_8.json"
+  },
+  "release_0_5_9": {
+    "status": "PUBLISHED_VERIFIED",
+    "source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
+    "url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.9",
+    "record": "docs/v3-delivery/RELEASE_0_5_9.json"
   }
 }
