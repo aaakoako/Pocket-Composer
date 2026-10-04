@@ -14,4 +14,5 @@ def test_stable_transition_is_explicit_and_does_not_downgrade_stable(monkeypatch
     monkeypatch.setattr('doubao_typeless.build_info.build_info',lambda:{'channel':channel,'version':current,'source_sha':'a'*40})
     result=check_preview_update(get_json=lambda _: {'tag_name':'v'+latest})
     assert result['update_available'] is available
+    assert result['automatic_update_available'] is (available and tuple(map(int, latest.split('.'))) >= tuple(map(int, current.split('.'))))
     assert result['auto_replace'] is False

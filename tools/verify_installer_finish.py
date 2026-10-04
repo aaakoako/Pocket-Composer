@@ -51,7 +51,7 @@ def verify(directory, report):
         (data / 'settings.json').write_text(json.dumps({key: '<smoke-disabled>' for key in
             ('hotkey_insert', 'hotkey_recall', 'hotkey_expand', 'hotkey_capture')}))
         pipe = 'InstallerFinish-' + uuid.uuid4().hex
-        receipt = root / 'ready.txt'
+        receipt = root / ('.update-ready-' + uuid.uuid4().hex)
         env = {**os.environ, 'DT_V3_DATA_DIR': str(data), 'DT_V3_PIPE': pipe,
                'DT_UPDATE_READY_FILE': str(receipt)}
         env.pop('QT_QPA_PLATFORM', None)

@@ -995,7 +995,7 @@ class ClientWindow:
                 self.update_install.setVisible(bool(self._update_package))
                 self.update_download.show()
                 self.update_button.setEnabled(True)
-                if automatic and info.get('update_available') and info.get('latest') != self._announced_update:
+                if automatic and info.get('automatic_update_available', info.get('update_available')) and info.get('latest') != self._announced_update:
                     self._announced_update = info.get('latest')
                     self.update_dialog.setAttribute(Qt.WA_ShowWithoutActivating, True)
                     self.update_dialog.show()

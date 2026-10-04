@@ -70,6 +70,8 @@ def check_preview_update(*, get_json: Callable[[str], dict[str, Any]] | None = N
         if latest and installed and not body.get('prerelease') and not body.get('draft'):
             switch_to_stable=info['channel']=='release-candidate' and latest[:2]==installed[:2]
             out['update_available'] = latest > installed or switch_to_stable
+            # 手动切换正式通道可以回退补丁版本，自动提示不推荐降级。
+            out['automatic_update_available'] = out['update_available'] and latest >= installed
             out['switch_to_stable']=switch_to_stable
             out['message'] = (f'发现正式版 {tag}，可打开下载页获取安装程序；不会自动替换。' if out['update_available']
                               else f'当前 {current} 已是最新可用版本。')

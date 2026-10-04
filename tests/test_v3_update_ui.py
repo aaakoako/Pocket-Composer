@@ -52,6 +52,16 @@ def test_manual_check_displays_failure_outside_settings(pair, monkeypatch):
     assert not window.update_timer.isActive()  # 源码测试不自动联网
 
 
+def test_candidate_does_not_automatically_prompt_for_older_stable(pair, monkeypatch):
+    app, window, _ = pair
+    monkeypatch.setattr(v3_update, 'check_preview_update', lambda **kw: {
+        'message': '切换至正式版', 'latest': '0.5.8', 'update_available': True,
+        'automatic_update_available': False})
+    window.check_update(automatic=True)
+    until(lambda: window.update_button.isEnabled())
+    assert not window.update_dialog.isVisible()
+
+
 def test_release_startup_schedules_automatic_check(pair, monkeypatch):
     from doubao_typeless import build_info
     from doubao_typeless.ui.desktop import ClientWindow
