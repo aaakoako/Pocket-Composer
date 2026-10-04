@@ -185,7 +185,9 @@ def test_sync_graph_never_marks_failed_image_as_received(tmp_path):
 def test_optional_jev_has_no_space_when_disabled_and_chart_opens_on_request(pair, monkeypatch):
     from PySide6.QtTest import QTest
     from tests.test_v3_input_check import OPTIONS
-    a, _, review = pair
+    a, window, review = pair
+    # 本例手动驱动展示状态；后台服务定时器不能在断言前覆盖刚设置的 disabled。
+    window.input_check_timer.stop()
     a.hud.start()
     try:
         a.update_pc_text('输入始终是主角')
