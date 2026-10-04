@@ -58,11 +58,45 @@ def pick_port(preferred: int = 8766) -> int:
 
 
 def lan_ip() -> str:
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect(("8.8.8.8", 80))
-        ip = sock.getsockname()[0]
-        sock.close()
-        return ip
-    except OSError:
-        return "127.0.0.1"
+    addresses = connection_addresses()
+    return addresses[0][0] if addresses else "127.0.0.1"
+
+
+def connection_addresses() -> list[tuple[str, str]]:
+    """优先列出已连接的局域网网卡；VPN 地址保留为显式备选。"""
+    from ipaddress import ip_address, ip_network
+    from PySide6.QtNetwork import QNetworkInterface as Interface
+
+    private = tuple(ip_network(net) for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+    overlay = ip_network('100.64.0.0/10')
+    virtual_names = ('tailscale', 'wireguard', 'wintun', 'vpn', 'tun', 'tap',
+                     'virtual', 'vmware', 'vethernet', 'docker', 'zerotier', 'clash')
+    ranked = []
+    for interface in Interface.allInterfaces():
+        flags = interface.flags()
+        if not (flags & Interface.IsUp and flags & Interface.IsRunning) or flags & Interface.IsLoopBack:
+            continue
+        name = interface.humanReadableName()
+        virtual = any(word in (name + ' ' + interface.name()).lower() for word in virtual_names)
+        physical = interface.type() in (Interface.Ethernet, Interface.Wifi) and not virtual
+        for entry in interface.addressEntries():
+            try:
+                address = ip_address(entry.ip().toString())
+            except ValueError:
+                continue
+            if address.version != 4 or address.is_loopback or address.is_link_local or address.is_unspecified or address.is_multicast:
+                continue
+            local = any(address in network for network in private)
+            vpn = virtual or address in overlay
+            rank = (0 if physical and local else 1 if physical and not vpn else
+                    2 if local and not vpn else 3 if local else 4)
+            hint = '（需手机接入同一 VPN）' if address in overlay or 'tailscale' in name.lower() else '（虚拟网络，需确认手机可达）'
+            label = f'{name} · {address}' + (hint if vpn else '')
+            ranked.append((rank, interface.index(), str(address), label))
+    seen = set()
+    result = []
+    for _, _, address, label in sorted(ranked):
+        if address not in seen:
+            seen.add(address)
+            result.append((address, label))
+    return result

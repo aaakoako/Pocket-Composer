@@ -1,15 +1,15 @@
 # 安装与使用 Pocket Composer
 
-> 仓库现已更名为 [Pocket-Composer](https://github.com/aaakoako/Pocket-Composer)。旧版内置自动更新不再维护；请从新仓库手动下载安装。现有数据目录保持不变。
+> 仓库现已更名为 [Pocket-Composer](https://github.com/aaakoako/Pocket-Composer)。新版从此仓库检查更新；仍指向旧仓库的旧客户端可手动下载安装。现有数据目录保持不变。
 
-**当前 Windows 稳定版：0.5.8**（[发布说明](0.5.8-live-sync.md)）：改进手机连续输入时电脑跟随的速度与状态提示。macOS/Linux 仍为体验版，见 [跨平台说明](CROSS_PLATFORM.md)。
+**当前 Windows 稳定版：0.5.9**（[发布说明](0.5.9-network-update-install.md)）：修复 VPN 地址选择，增加自动更新检查、独立更新窗口和安装后启动。macOS/Linux 仍为体验版，见 [跨平台说明](CROSS_PLATFORM.md)。
 
 安装包和便携包包含同一套 Windows 客户端与手机页面。下载文件名保留旧标识 `DoubaoTypeless_<版本>_win_x64_Setup.exe` 供更新器识别，产品名称为 Pocket Composer。版本标注“发布候选”时，仍需完成真实手机和目标输入框验收；这不代表已经公开发布。
 
 ## 开始使用
 
 1. 从旧版托盘正常退出，保留旧目录和数据。
-2. 从 [Releases](https://github.com/aaakoako/Pocket-Composer/releases/latest) 下载并运行 `DoubaoTypeless_<版本>_win_x64_Setup.exe`（当前稳定版为 0.5.8）。仅为当前 Windows 用户安装，无需管理员权限。以后从开始菜单打开 **Pocket Composer**（安装目录与可执行文件名仍为 DoubaoTypeless）。
+2. 从 [Releases](https://github.com/aaakoako/Pocket-Composer/releases/latest) 下载并运行 `DoubaoTypeless_<版本>_win_x64_Setup.exe`（当前稳定版为 0.5.9）。仅为当前 Windows 用户安装，无需管理员权限。点击完成后默认打开程序，以后也可从桌面或开始菜单打开 **Pocket Composer**（安装目录与可执行文件名仍为 DoubaoTypeless）。
 3. 手机与电脑接入同一网络，扫描电脑连接页的二维码。地址和端口以该页为准，不沿用旧预览端口。
 4. 在电脑连接页允许手机插入。点一下 Codex/Cursor 的对话输入框，再用手机说话、加入图片，点“插入电脑”。插入不会自动发送消息。
 5. 插入后手机可开始下一段。需要上一段时使用“恢复”；不要重复点插入来猜测图片是否已经进入目标。
@@ -35,6 +35,10 @@
 设置中的“数据与备份”可以打开当前目录。升级首次启动会在 `upgrade-backups` 保存当前草稿、图片、设置、恢复记录及本地持久文件；SQLite 通过备份接口保存。只把含有 `backup-complete.json` 的目录视为完成备份。正常安装的 API Key 存在 Windows 凭据库，文件备份不包含该密钥；固定工作区内升级会继续使用已有凭据。
 
 新版设置中的“检查更新”发现正式版本后，可以点“下载并重启更新”。完整下载和校验通过后才交接退出；新版启动就绪后才切换安装入口。下载失败仍使用当前版本，升级交接超时会撤销本次操作；已安装版本的解压或启动失败会尝试重新打开旧程序。安装目录中的 `versions` 按版本和构建标识分开保存，会保留此前安装的程序，便于回退同一数据格式的版本。未来数据格式不兼容时，旧版本会拒绝修改数据。
+
+0.5.9 起，安装会创建桌面和开始菜单快捷方式，安装完成页默认勾选“打开 Pocket Composer”；静默安装不额外启动。客户端启动后自动检查一次，此后每 6 小时检查；发现新版本时显示独立更新窗口，同次运行不重复提示相同版本。网络失败或已经最新时保持安静，手动检查会显示结果。下载与安装仍由你点击确认。
+
+同时开启 Tailscale 或其他 VPN 时，连接页优先显示已连接的局域网网卡地址。多网卡可以在地址下方切换，二维码和复制地址随之更新；切换 Wi-Fi 后点“刷新网络地址”。选择 Tailscale 地址时，手机也需要接入同一虚拟网络；局域网地址仍要求手机与电脑之间可达。
 
 需要恢复备份时，退出程序，保留当前工作区副本，再把一份完整备份放到独立目录，用程序的 `--data-dir` 参数打开核对。凭据与 Windows 账户及工作区路径绑定，换目录或换账户后需要重新填写 API Key。不要在运行中覆盖工作区。
 

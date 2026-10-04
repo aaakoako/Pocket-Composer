@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "product_goal": "Pocket Composer 0.5.8 稳定版发布：同步修复、凭据清理提示和统一入口",
+  "product_goal": "Pocket Composer 0.5.9：VPN 地址选择、自动检查更新和独立窗口、安装快捷方式与完成后启动",
   "current_head": "USE_GIT_HEAD_FOR_METADATA_AND_BUILD_INFO_FOR_PRODUCT",
-  "working_tree": "发布后文档记录；正式构建固定为 v0.5.8 / c219cadb4dfed68c16177e0678ad02b6b114f7ce",
+  "working_tree": "fix/network-update-install-20261004；PR #15；0.5.9 候选验证中",
   "source_base": "e5604f832e7a58bff5e57166bd5cd0b8aa7764e9",
   "last_completed_slice": "RELEASE_0_5_8_PUBLISHED_VERIFIED",
-  "active_slice": null,
-  "next_action": "0.5.8 已公开为 latest，发布流程完成；按实际使用反馈迭代。实体手机输入法、多屏及日用目标应用仍未声称用户验收。",
+  "active_slice": "NETWORK_UPDATE_INSTALL_0_5_9",
+  "next_action": "读取候选构建 37196963710 的安装完成页、快捷方式、新版启动与既有回归结果；通过后发布修复版。实体手机跨网可达性与日用焦点行为未声称验收。",
   "accepted_requirements": [
     "MASTER_PLAN唯一入口；手机主稿、弱网本地保存与后台图片续传继续有效",
     "保留电脑改字、插入并复制、独立复制、图文恢复、手机下一段、截图/相册/白板/BYOK",
