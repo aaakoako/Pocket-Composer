@@ -14,6 +14,8 @@ from urllib.request import urlopen
 from urllib.parse import urlparse
 
 import win32con
+import win32api
+import win32event
 import win32gui
 import win32process
 import win32com.client
@@ -69,17 +71,20 @@ def verify(directory, report):
             win32gui.EnumChildWindows(hwnd, lambda h, _: found.append(h), None)
             return found
 
-        def quit_app():
+        def command(message):
             sock = QLocalSocket()
             sock.connectToServer(pipe)
             if not sock.waitForConnected(1000):
-                return False
-            sock.write(b'quit\n')
+                return {}
+            sock.write(message.encode('ascii') + b'\n')
             sock.waitForBytesWritten(1000)
             sock.waitForReadyRead(2000)
             answer = bytes(sock.readAll())
             sock.close()
-            return json.loads(answer).get('accepted') == 'quit'
+            return json.loads(answer)
+
+        def quit_app():
+            return command('quit').get('accepted') == 'quit'
 
         try:
             hwnd = wait_for(window)
@@ -115,7 +120,16 @@ def verify(directory, report):
             with urlopen(f'http://127.0.0.1:{port}/', timeout=5) as response:
                 assert response.status == 200
             result['finish_started_current_build'] = True
-            assert quit_app()
+            identity = command('identify')
+            assert identity['source_sha'] == info['source_sha'] and Path(identity['executable']) == exe
+            # 退出日志先于 PyInstaller/Qt 完全释放文件；等待该进程句柄，不能用日志冒充进程结束。
+            process = win32api.OpenProcess(win32con.SYNCHRONIZE | 0x1000, False, identity['pid'])
+            try:
+                assert quit_app()
+                assert win32event.WaitForSingleObject(process, 20000) == win32event.WAIT_OBJECT_0
+                assert win32process.GetExitCodeProcess(process) == 0
+            finally:
+                process.Close()
             def exited():
                 log = data / 'logs/runtime.log'
                 if not log.exists():
