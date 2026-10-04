@@ -94,6 +94,17 @@ def test_network_choice_changes_display_qr_and_copy(pair, monkeypatch):
     assert window._clipboard.text().startswith('http://100.101.2.3:')
     assert window._pairing_url.startswith('http://100.101.2.3:')
 
+
+def test_typing_refresh_reuses_adapter_result_until_next_network_poll(pair, monkeypatch):
+    from doubao_typeless.ui import desktop
+    app, window, _ = pair
+    calls = []
+    monkeypatch.setattr(desktop, 'lan_ip', lambda: calls.append(True) or '192.168.1.20')
+    window._address_checked_at = 0
+    for _ in range(50):
+        assert '192.168.1.20' in window.phone_url()
+    assert len(calls) == 1
+
 @pytest.mark.parametrize('fails',[False,True])
 def test_explicit_update_button_quits_only_after_valid_handoff(pair,tmp_path,monkeypatch,fails):
     app,window,_=pair

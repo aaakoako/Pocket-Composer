@@ -910,11 +910,23 @@ class ClientWindow:
             self.byok_status.setText(str(exc));self.byok_url_note.setText('地址格式有误');return False
 
     def phone_url(self) -> str:
-        return f"http://{self._selected_address or lan_ip()}:{self.app.port}/"
+        import time
+        if self._selected_address:
+            address = self._selected_address
+        else:
+            now = time.monotonic()
+            if now >= getattr(self, '_address_checked_at', 0) + 5:
+                self._automatic_address = lan_ip()
+                self._address_checked_at = now
+            address = self._automatic_address
+        return f"http://{address}:{self.app.port}/"
 
     def _refresh_addresses(self) -> None:
+        import time
         from doubao_typeless.runtime import connection_addresses
         addresses = connection_addresses()
+        self._automatic_address = addresses[0][0] if addresses else '127.0.0.1'
+        self._address_checked_at = time.monotonic()
         self.address_choice.clear()
         self.address_choice.addItem('自动选择局域网地址', None)
         for address, label in addresses:
