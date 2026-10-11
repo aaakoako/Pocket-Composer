@@ -770,7 +770,7 @@
     "record": "docs/v3-delivery/RELEASE_0_5_9.json"
   },
   "input_sync_repair_20261011": {
-    "status": "FROZEN_LOCAL_CANDIDATE_VERIFIED_AWAITING_RUNTIME_SWITCH",
+    "status": "DAILY_RUNTIME_SWITCHED_VERIFIED",
     "branch": "fix/input-sync-20261011",
     "installed_source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
     "record": "docs/v3-delivery/INPUT_SYNC_REPAIR_20261011.md",
@@ -778,15 +778,24 @@
     "phone_checks_passed": 8,
     "native_clipboard_rounds": 20,
     "native_edit_full_pastes": 20,
-    "daily_runtime_restarted": false,
+    "daily_runtime_restarted": true,
     "physical_phone_tested": false,
     "real_target_ctrl_v_tested": false,
-    "next_action": "用户同意后正常退出日用实例，以修复候选读取同一数据目录启动；核对实体手机全文同步与真实输入目标。",
+    "next_action": "实体安卓浏览器刷新原页面加载新版；核对完整语音尾段、真实目标插入与下一段清空。未代称用户验收。",
     "candidate_source_sha": "19754b16e802f19f5d2796b30e47e8014a66f2d9",
     "delivery_root": "G:\\AgentStorage\\Deliveries\\PocketComposer-input-sync-20261011",
     "frozen_startup_and_sync_verified": true,
     "frozen_exit_code": 0,
     "payload_files": 1021,
-    "cleanup_auto_review": "blocked by policy; no retry; .qa-temp retained; manual preview script provided"
+    "cleanup_auto_review": "blocked by policy; no retry; .qa-temp retained; manual preview script provided",
+    "daily_source_sha": "19754b16e802f19f5d2796b30e47e8014a66f2d9",
+    "daily_pid": 53924,
+    "daily_executable": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\DoubaoTypeless\\versions\\0.5.9-19754b16\\DoubaoTypeless.exe",
+    "daily_port": 8766,
+    "draft_unchanged_at_switch": true,
+    "settings_trust_vocabulary_hashes_unchanged": true,
+    "registered_hotkeys": 4,
+    "failed_hotkeys": 0,
+    "switch_recovery_dir": "G:\\AgentStorage\\Workspaces\\DoubaoTypeless-runtime-switch-20261011\\before-19754b16"
   }
 }
