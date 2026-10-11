@@ -16,6 +16,8 @@
 - 旧安装包的生产网页与修复网页对比，在同一隔离桥接服务上模拟缺失 input：旧版手机 24 字符、电脑仅 4；修复版两端均 24。不等于安卓豆包输入法真机测试。
 - 证据在 `docs/v3-delivery/evidence/input-sync-20261011/`。网页测试使用真实 Chromium、WebSocket 和 IndexedDB；按键投递用替身。日用目录、配置、配对与历史未被修复代码覆盖，运行中的日用进程没有重启。
 
-尚待修复候选的冻结启动检查；实体安卓手机与真实 Codex/Cursor 插入、日用版切换及用户验收尚未完成。候选不发布、不合并主干。
+冻结候选 `19754b16e802f19f5d2796b30e47e8014a66f2d9` 已生成于 `G:/AgentStorage/Deliveries/PocketComposer-input-sync-20261011`，入口「启动修复预览.lnk」使用独立的 G 盘数据目录。冻结检查核对实际 PID/源码身份、全文漏事件同步、清空后刷新持久化、独立 IPC 正常退出，退出码 0；关闭了全局快捷键，没有前台操作。EXE SHA-256：`d2bf7b1f6b0c7ebc105761510ffb744e3ee1f996c49c6b299120bdf8707c2290`。实体安卓手机与真实 Codex/Cursor 插入、日用版切换及用户验收尚未完成。候选不发布、不合并主干。
+
+自动审批拒绝包含本轮 `.qa-temp` 清理的命令，只返回 `blocked by policy`。代理没有自动重试删除，临时目录仍保留且从 Git/载荷排除。人工脚本位于交付目录「清理本轮测试临时文件.ps1」，固定绝对路径，默认只预览，用户自行加 `-Execute` 才删除；删除前重查进程、链接、已保留证据哈希与源码完整性。代理仅验证脚本语法，未执行清理脚本。
 
 Windows 读取/写入契约参考：[GetClipboardData](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboarddata)、[SetClipboardData](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setclipboarddata)。本机 1418 与恢复结论来自实测，非文档推断。
