@@ -1,0 +1,8 @@
+{
+  "rounds": 20,
+  "read_retries": 18,
+  "complete_native_edit_pastes": 20,
+  "visible_windows_created": 0,
+  "clipboard_restored": true,
+  "errors": []
+}

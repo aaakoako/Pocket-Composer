@@ -24,6 +24,7 @@ ERRORS = {
     'INPUT_REJECTED': 'Windows未接受按键，内容保留；可复制后手动粘贴',
     'INPUT_PARTIAL': 'Windows只接受部分按键，请先检查目标；没有自动重贴',
     'CLIPBOARD_INTERFERENCE': '剪贴板被其他操作改变，已停止插入且未覆盖它',
+    'CLIPBOARD_UNAVAILABLE': '剪贴板暂时读不出，没有继续插入；原稿保留，可重试',
     'DELIVERY_FAILED': '插入未完成，内容保留；可复制或重新选择目标',
     'FINALIZE_FAILED': '插入结果待确认，恢复副本已保留；请先检查目标',
     'COMMAND_FAILED': '本次操作中断，内容保留；程序仍可继续使用',

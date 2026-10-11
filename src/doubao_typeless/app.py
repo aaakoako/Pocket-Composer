@@ -368,6 +368,8 @@ class V3App:
 
     def _copy_fallback(self, bundle: dict, payload: dict) -> dict:
         """Explicit local Insert-and-copy still leaves a manual paste when targeting fails."""
+        if payload.get("detail_code") == "CLIPBOARD_UNAVAILABLE":
+            return payload
         if payload.get("steps") or payload.get("error_code") not in {
             "NEEDS_TARGET", "OWN_WINDOW", "COMPOSER_NOT_FOUND", "COMPOSER_AMBIGUOUS",
             "TARGET_CHANGED", "TARGET_ELEVATED", "TARGET_PERMISSION_UNKNOWN",
@@ -742,12 +744,10 @@ class V3App:
         return target_above_ours()
 
     def _read_clipboard_text(self) -> str | None:
-        try:
-            from doubao_typeless.platform.desktop import read_clipboard_text
+        from doubao_typeless.platform.desktop import read_clipboard_text
 
-            return read_clipboard_text()
-        except Exception:
-            return None
+        # 无法读取与读到了另一份文字是两种结果；读取失败不得伪装成内容变化。
+        return read_clipboard_text()
 
     def _read_focus(self):
         from doubao_typeless.platform.desktop import read_target
@@ -996,6 +996,7 @@ class V3App:
         event["progress"] = payload["progress"]
         self.phone_send.record_delivery(bundle, payload, self._last_target_fp)
         if payload.get("error_code"): event["error_code"] = payload["error_code"]
+        if payload.get("detail_code"): event["detail_code"] = payload["detail_code"]
         self.bridge.last_phone_event = event
         # 回执必须在任何网络发送之前落盘：发送 attempt.status 失败或进程随后退出，
         # 手机重连仍能从 /v3/phone/event 取到“已投递”，不会把同一稿当作未发再发一次。

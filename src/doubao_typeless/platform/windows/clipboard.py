@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from typing import Callable
 
 if sys.platform == "win32":
+    import pywintypes
     import win32clipboard
     import win32con
     import win32gui
@@ -98,10 +99,24 @@ def clipboard_sequence() -> int:
 def read_clipboard_text() -> str | None:
     if sys.platform != "win32":
         return None
-    with opened_clipboard():
-        if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
-            return str(win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT))
-        return None
+    # CloseClipboard 后剪贴板监听器可能立刻读取/转换格式；OpenClipboard
+    # 成功也不保证随后的 GetClipboardData 不会暂时报 1418。重试整个读取事务，
+    # 只处理访问错误：读到别的文字仍立即交给投递保护判断，绝不重写剪贴板。
+    deadline = time.monotonic() + 0.25
+    while True:
+        try:
+            with opened_clipboard():
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                    return str(win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT))
+                return None
+        except (OSError, pywintypes.error) as exc:
+            if time.monotonic() >= deadline:
+                raise ClipboardReadError() from exc
+            time.sleep(0.01)
+
+
+class ClipboardReadError(OSError):
+    error_code = "CLIPBOARD_UNAVAILABLE"
 
 
 def set_clipboard_text(text: str) -> None:

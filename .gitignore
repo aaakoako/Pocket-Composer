@@ -90,6 +90,7 @@ preview-v3-00/
 
 # Local rendering output; curated evidence is tracked separately
 /qt-shots/
+/.qa-temp/
 /build-info.json
 /release/
 /installer-test/

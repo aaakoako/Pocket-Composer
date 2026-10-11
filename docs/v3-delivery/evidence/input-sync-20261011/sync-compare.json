@@ -1,0 +1,16 @@
+[
+  {
+    "build": "installed-0.5.9",
+    "asset": "./assets/index-BDEGLum_.js",
+    "full_text_received_without_click": false,
+    "pc_chars": 4,
+    "phone_chars": 24
+  },
+  {
+    "build": "repair",
+    "asset": "./assets/index-RFKtgn51.js",
+    "full_text_received_without_click": true,
+    "pc_chars": 24,
+    "phone_chars": 24
+  }
+]

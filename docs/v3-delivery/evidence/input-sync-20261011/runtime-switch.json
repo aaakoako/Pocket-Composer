@@ -1,0 +1,18 @@
+{
+  "old_source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
+  "new_source_sha": "19754b16e802f19f5d2796b30e47e8014a66f2d9",
+  "data_dir": "C:\\Users\\Administrator\\AppData\\Local\\DoubaoTypeless\\workspace-v3",
+  "old_pid": 24260,
+  "old_quit_acknowledged": true,
+  "old_exited_normally": true,
+  "new_pid": 53924,
+  "daily_port": 8766,
+  "repaired_frontend_served": true,
+  "settings_trust_vocabulary_hashes_unchanged": true,
+  "draft_preserved_or_advanced": true,
+  "draft_unchanged_at_switch": true,
+  "shortcuts_updated": 2,
+  "configured_autostart_retained": true,
+  "old_executable_retained": true,
+  "backup_dir": "G:\\AgentStorage\\Workspaces\\DoubaoTypeless-runtime-switch-20261011\\before-19754b16"
+}

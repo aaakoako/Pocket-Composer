@@ -1,0 +1,14 @@
+{
+  "source_sha": "19754b16e802f19f5d2796b30e47e8014a66f2d9",
+  "mode": "offscreen; hotkeys disabled; no keyboard/clipboard input",
+  "physical_phone_tested": false,
+  "identified_source_and_pid": true,
+  "bridge_port": 8767,
+  "frontend_asset": "./assets/index-RFKtgn51.js",
+  "full_text_without_input_event_received": true,
+  "clear_persisted_across_reload": true,
+  "page_errors": [],
+  "quit_acknowledged": true,
+  "exit_code": 0,
+  "exe_sha256": "d2bf7b1f6b0c7ebc105761510ffb744e3ee1f996c49c6b299120bdf8707c2290"
+}
