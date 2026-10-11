@@ -1,5 +1,6 @@
 import { decorateTools } from "./icons";
 import { installInputMotion } from './input-motion';
+import { installTextInputSync } from './text-input';
 import { overlayHistory } from "./overlay-history";
 import { SharedEditor, type Tool } from "./editor/canvas";
 import { applyReady, applyRotated, buildDraftUpdate, buildPrimaryUpdate, rotatePrimary, DraftOutbox } from "./sync.js";
@@ -477,9 +478,9 @@ export function boot(root: HTMLElement): void {
 
   let attachmentsSignature = "";
   function update() {
-    renderSyncState();
     const input = $("text") as HTMLTextAreaElement;
-    if (input.value !== state.text) input.value = state.text;
+    textInput.render();
+    renderSyncState();
     const writable = restored && !tabInactive;
     // 未能保全的内容留在本页：只读而不禁用，用户仍可长按选中复制。
     input.disabled = !writable && !(tabInactive && keptUnsaved);
@@ -660,8 +661,15 @@ export function boot(root: HTMLElement): void {
       }
       if (msg.type === "attempt.status") {
         if (activeSend && !finishFeedback(msg)) return;
+        // 明确没有执行任何步骤的失败允许用户再次点击重试；已有粘贴步骤或
+        // 回执丢失时仍沿用原意图判重，绝不自动重放或把 UNKNOWN 当成未发送。
+        if (msg.error_code && !msg.duplicate && Array.isArray(msg.steps) && !msg.steps.length &&
+            ['NO_STEPS', 'UNKNOWN', 'CANCELLED'].includes(msg.result) &&
+            state.last_intent?.id === msg.intent_id) {
+          state.last_intent = null; persistDraft();
+        }
         const labels: Record<string, string> = {CONFIRMED:"已放入输入框",UNKNOWN:"已尝试插入，可召回重试",NO_STEPS:"未插入，请先选中电脑输入框",PARTIAL:"只完成一部分，请查看恢复选项",BUSY:"正在处理上一份内容"};
-        const base = msg.progress?.message || labels[msg.result] || "插入未完成，内容保留";
+        const base = insertionError(msg) || msg.progress?.message || labels[msg.result] || "插入未完成，内容保留";
         const detail = msg.receipt_saved === false ? `${base}（电脑未能保存这次回执，请先在电脑上确认，勿重复插入）` : base;
         $("deliveryStatus").textContent=`上次插入：${detail}`;$("deliveryStatus").hidden=false;
         toast(`上次插入：${detail}`);
@@ -670,7 +678,7 @@ export function boot(root: HTMLElement): void {
       if (msg.type === "draft.rotated") {
         const relevant = !activeSend || (!!activeSend.intentId && msg.intent_id === activeSend.intentId);
         finishFeedback(msg); update();
-        if(relevant && msg.progress?.message){$("deliveryStatus").textContent=`上次插入：${msg.progress.message}`;$("deliveryStatus").hidden=false;}
+        if(relevant && (insertionError(msg) || msg.progress?.message)){$("deliveryStatus").textContent=`上次插入：${insertionError(msg) || msg.progress.message}`;$("deliveryStatus").hidden=false;}
         void handleReceipt(msg);
       }
       if (msg.type === "draft.restore_proposal") {
@@ -782,6 +790,13 @@ export function boot(root: HTMLElement): void {
   function errorText(err: string, msg: any): string {
     if (err.includes("not granted") && msg?.request_type === "capture.request") return ERROR_TEXT.CAPTURE_DENIED;
     return ERROR_TEXT[err] || String(msg?.message || "") || "电脑未接受这次操作，草稿保留";
+  }
+  function insertionError(msg: any): string {
+    const errors: Record<string,string> = {
+      CLIPBOARD_INTERFERENCE: "电脑剪贴板内容被改变，已停止插入；当前稿保留",
+      CLIPBOARD_UNAVAILABLE: "电脑剪贴板暂时读不出，未继续插入；当前稿保留，可重试",
+    };
+    return errors[msg.detail_code || msg.error_code] || "";
   }
 
   function dataUrlToBlob(url: string): Blob | null {
@@ -941,6 +956,7 @@ export function boot(root: HTMLElement): void {
   }
   async function handleReceiptNow(msg: any) {
     if (!msg.phone_primary) return;
+    textInput.reconcile();
     // 写下上一份可恢复图文，再尝试轮换；期间的新编辑会令匹配失败，不被清除。
     const before = draftSnapshot();
     const probe = {...state, assets:state.assets.map(a=>({...a}))};
@@ -1009,6 +1025,7 @@ export function boot(root: HTMLElement): void {
     } catch { /* 仅取数据，不重放插入动作。 */ }
   }
   async function prepareForDesktop(requestId: string) {
+    textInput.reconcile();
     const message = currentMessage();
     if (tabInactive || !restored) {
       // 暂停的页面只回“不是当前页”，由电脑等待同一手机的当前页面。
@@ -1037,6 +1054,7 @@ export function boot(root: HTMLElement): void {
   });
   window.addEventListener("online", () => {void recoverConnection();});
   function onForeground() {
+    textInput.reconcile();
     if (!restored || repository.writingSide) {if (restored) probeConnection(); return;}
     // 回到前台的页面接续编辑：读入最新主稿并成为写入者；别的页面随之暂停。
     if (tabInactive) {void activateTab(); return;}
@@ -1051,14 +1069,16 @@ export function boot(root: HTMLElement): void {
   window.addEventListener("pageshow", () => {if (restored) onForeground();});
 
   let termTimer = 0;
-  $("text").addEventListener("input", (e) => {
-    state.text = (e.target as HTMLTextAreaElement).value;
-    sendDraft();
-    update();
-    window.clearTimeout(termTimer);
-    termTimer = window.setTimeout(() => {
-      void refreshTerms().catch(() => {});
-    }, 400);
+  const textInput = installTextInputSync($("text") as HTMLTextAreaElement, {
+    getText: () => state.text,
+    canEdit: () => restored && !tabInactive && !clearingDraft,
+    onEdit: text => {
+      state.text = text;
+      sendDraft();
+      update();
+      window.clearTimeout(termTimer);
+      termTimer = window.setTimeout(() => { void refreshTerms().catch(() => {}); }, 400);
+    },
   });
   async function refreshTerms() {
     if (!state.session || !state.online || !state.text.trim() || syncState !== "synced") return;
@@ -1429,6 +1449,7 @@ export function boot(root: HTMLElement): void {
   $("connectBtn").onclick = () => {void recoverConnection(true);};
   $("sendBtn").onclick = () => { void sendBundle(); };
   async function sendBundle() {
+    textInput.reconcile();
     if (activeSend || state.sending) return;
     if (!state.session || !ws || !state.online) {
       toast("未连接，草稿保留");

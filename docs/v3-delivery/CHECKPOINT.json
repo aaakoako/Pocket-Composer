@@ -768,5 +768,19 @@
     "source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
     "url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.9",
     "record": "docs/v3-delivery/RELEASE_0_5_9.json"
+  },
+  "input_sync_repair_20261011": {
+    "status": "LOCAL_REPAIR_VERIFIED_BUILD_PENDING",
+    "branch": "fix/input-sync-20261011",
+    "installed_source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
+    "record": "docs/v3-delivery/INPUT_SYNC_REPAIR_20261011.md",
+    "regression_passed": 106,
+    "phone_checks_passed": 8,
+    "native_clipboard_rounds": 20,
+    "native_edit_full_pastes": 20,
+    "daily_runtime_restarted": false,
+    "physical_phone_tested": false,
+    "real_target_ctrl_v_tested": false,
+    "next_action": "生成冻结候选并验证独立工作区启动；日用切换需先避免打断用户当前输入。"
   }
 }
