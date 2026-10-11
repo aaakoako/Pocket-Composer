@@ -1,0 +1,118 @@
+{
+  "version": "0.5.10",
+  "source_sha": "40ccde5eeb5a26f9a4e5916d99f86d1b07d76a31",
+  "passed": true,
+  "release_url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.10",
+  "assets": [
+    {
+      "name": "DoubaoTypeless.exe",
+      "bytes": 40576525,
+      "sha256": "df5061b15e442d07664f7e4b2b1ddca8d4110dba77aa1a061dab7e3e9ea6d9c0",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.10_win_x64_Setup.exe",
+      "bytes": 40576525,
+      "sha256": "df5061b15e442d07664f7e4b2b1ddca8d4110dba77aa1a061dab7e3e9ea6d9c0",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.10_win_x64_files.json",
+      "bytes": 55944,
+      "sha256": "d8e182f9b33cbc907091ad38897353276742c0239a710f9e70fe10445dfbeceb",
+      "public_download_verified": true
+    },
+    {
+      "name": "DoubaoTypeless_0.5.10_win_x64_portable.zip",
+      "bytes": 57064021,
+      "sha256": "966b28b6340a99820dab780c695aa1922e38e1206e72b6f355d9ac309ad3ef4c",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 303,
+      "sha256": "546b1ca6eec840b0e862f45ba9ff2d74e28c08ef86687f8969ec849173ff07b6",
+      "public_download_verified": true
+    }
+  ],
+  "build_identity": {
+    "source_sha": "40ccde5eeb5a26f9a4e5916d99f86d1b07d76a31",
+    "version": "0.5.10",
+    "channel": "stable",
+    "release_ready": false
+  },
+  "portable_manifest_files_verified": 304,
+  "update_discovery": [
+    {
+      "current": "0.5.8",
+      "channel": "stable",
+      "update_available": true
+    },
+    {
+      "current": "0.5.9",
+      "channel": "stable",
+      "update_available": true
+    },
+    {
+      "current": "0.5.9",
+      "channel": "release-candidate",
+      "update_available": true
+    },
+    {
+      "current": "0.5.10",
+      "channel": "release-candidate",
+      "update_available": true
+    },
+    {
+      "current": "0.5.10",
+      "channel": "stable",
+      "update_available": false
+    }
+  ],
+  "status": "PUBLISHED_VERIFIED",
+  "workflow": "https://github.com/aaakoako/Pocket-Composer/actions/runs/38150874571",
+  "pull_request": "https://github.com/aaakoako/Pocket-Composer/pull/16",
+  "ci": {
+    "linux": {
+      "tests": 857,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 12,
+      "passed": 845
+    },
+    "windows": {
+      "tests": 857,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 856
+    }
+  },
+  "native_reports": [
+    "startup",
+    "text",
+    "phone-primary",
+    "browser",
+    "installer",
+    "installer-finish",
+    "legacy-upgrade",
+    "upgrade-failures"
+  ],
+  "browser_cases": 14,
+  "installer_finish": {
+    "passed": true,
+    "mode": "native NSIS wizard on disposable CI desktop",
+    "finish_launch_checked_by_default": true,
+    "desktop_and_start_menu_target": "versions\\0.5.10-40ccde5e\\DoubaoTypeless.exe",
+    "finish_started_current_build": true,
+    "http_ready": true,
+    "ipc_quit": true,
+    "shortcuts_removed_on_uninstall": true
+  },
+  "physical_phone_tested_by_automation": false,
+  "real_codex_cursor_tested": false,
+  "all_device_target_acceptance_claimed": false,
+  "installed_on_user_machine": false,
+  "daily_repair_source_sha": "19754b16e802f19f5d2796b30e47e8014a66f2d9",
+  "user_daily_feedback": "感觉可以了，发一个新版吧"
+}

@@ -770,7 +770,7 @@
     "record": "docs/v3-delivery/RELEASE_0_5_9.json"
   },
   "input_sync_repair_20261011": {
-    "status": "RELEASE_0_5_10_AUTHORIZED",
+    "status": "RELEASED_IN_VERIFIED_0_5_10",
     "branch": "fix/input-sync-20261011",
     "installed_source_sha": "f1632ed8e1df0cc8b434b8bc1619731908760221",
     "record": "docs/v3-delivery/INPUT_SYNC_REPAIR_20261011.md",
@@ -781,7 +781,7 @@
     "daily_runtime_restarted": true,
     "physical_phone_tested": false,
     "real_target_ctrl_v_tested": false,
-    "next_action": "正式发行：核对最终提交和两平台 CI、冻结安装升级证据，发布并校验公开下载。",
+    "next_action": "0.5.10 已发布并核对公开下载；本机日用修复候选可通过检查更新切换正式版。",
     "candidate_source_sha": "19754b16e802f19f5d2796b30e47e8014a66f2d9",
     "delivery_root": "G:\\AgentStorage\\Deliveries\\PocketComposer-input-sync-20261011",
     "frozen_startup_and_sync_verified": true,
@@ -799,6 +799,15 @@
     "switch_recovery_dir": "G:\\AgentStorage\\Workspaces\\DoubaoTypeless-runtime-switch-20261011\\before-19754b16",
     "user_feedback": "感觉可以了，发一个新版吧",
     "release_authorized": true,
-    "release_version": "0.5.10"
+    "release_version": "0.5.10",
+    "release_source_sha": "40ccde5eeb5a26f9a4e5916d99f86d1b07d76a31",
+    "release_url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.10"
+  },
+  "release_0_5_10": {
+    "status": "PUBLISHED_VERIFIED",
+    "source_sha": "40ccde5eeb5a26f9a4e5916d99f86d1b07d76a31",
+    "url": "https://github.com/aaakoako/Pocket-Composer/releases/tag/v0.5.10",
+    "record": "docs/v3-delivery/RELEASE_0_5_10.json",
+    "all_device_target_acceptance_claimed": false
   }
 }
