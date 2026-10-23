@@ -1,6 +1,6 @@
 aiohttp==3.14.3
 httpx==0.28.1
-Pillow==12.3.0
+Pillow==13.0.0
 qrcode==8.2
 PySide6==6.11.2
 comtypes==1.4.17; sys_platform == "win32"
